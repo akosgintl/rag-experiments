@@ -1,0 +1,23 @@
+# PyTorch with CUDA support (for GPU acceleration)
+# Install separately with: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Or for CPU only: pip install torch torchvision torchaudio
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Document processing and extraction
+docling[vlm]
+docling-core
+sentence-transformers
+chromadb
+pillow
+pandas
+openpyxl
+unstructured[pdf,paddleocr]
+beautifulsoup4
+lxml
+langchain
+markitdown
+openai
+huggingface_hub[hf_xet]
+hf_xet
