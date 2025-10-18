@@ -209,3 +209,5 @@ __marimo__/
 docs/
 docling_output/
 unstructured_output/
+markitdown_output/
+figures/

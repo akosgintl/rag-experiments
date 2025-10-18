@@ -6,9 +6,20 @@
 # pip install unstructured[pdf,paddleocr] sentence-transformers chromadb
 # pip install pillow pandas openpyxl
 
+# IMAGE EXTRACTION NOTES:
+# -----------------------
+# Unstructured.io saves extracted images to disk by default.
+# - The 'image_output_dir_path' parameter controls where images are saved
+# - By default, images go to a 'figures/' directory if not specified
+# - This script configures it to save to the output directory
+# - Images are then organized into 'images/' and 'tables/' subdirectories
+# - Image metadata contains file paths (image_path, image_file, or image_filepath)
+# - This script handles both disk-based extraction (preferred) and base64 (fallback)
+
 import os
 import json
 import base64
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any
 import pandas as pd
@@ -53,8 +64,8 @@ class UnstructuredAdvancedProcessor:
         embedding_model="all-MiniLM-L6-v2", 
         output_dir="./unstructured_output",
         device="auto",  # "cpu", "cuda", or "auto" (auto-detect best available)
-        do_ocr=False,  # Set to False for text-based PDFs to avoid OCR overhead
-        ocr_languages=None  # OCR languages, e.g., ["eng"], ["hun"], ["eng", "hun"]
+        do_ocr=True,  # Set to False for text-based PDFs to avoid OCR overhead
+        ocr_languages=["hun"]  # OCR languages, e.g., ["eng"], ["hun"], ["eng", "hun"]
     ):
         """
         Initialize the UnstructuredAdvancedProcessor
@@ -100,7 +111,8 @@ class UnstructuredAdvancedProcessor:
                 "include_metadata": True,
                 
                 # IMAGE AND TABLE EXTRACTION - KEY PARAMETERS
-                "extract_image_block_types": ["Image", "Table"],  # Extract base64 images
+                "extract_image_block_types": ["Image", "Table"],  # Extract images from Image and Table blocks
+                "image_output_dir_path": str(self.output_dir),  # Save images to output directory
                 
                 # Additional quality settings for hi_res
                 "hi_res_model_name": "yolox" if strategy == "hi_res" else None,
@@ -138,6 +150,22 @@ class UnstructuredAdvancedProcessor:
             # Process all elements
             self._process_elements(elements, extracted_content, pdf_path)
             
+            # Clean up any leftover 'figures' directory created by unstructured
+            # (images should already be organized into images/ and tables/ directories)
+            figures_dir = self.output_dir / "figures"
+            if figures_dir.exists():
+                try:
+                    # Check if there are any remaining images that weren't processed
+                    remaining_images = list(figures_dir.glob("*"))
+                    if remaining_images:
+                        print(f"  Note: Found {len(remaining_images)} unprocessed images in figures directory")
+                        print(f"  These may be images not associated with Table or Image elements")
+                    # Optionally remove the figures directory
+                    # shutil.rmtree(figures_dir)
+                    # print(f"  Cleaned up figures directory")
+                except Exception as e:
+                    print(f"  Warning: Could not clean up figures directory: {e}")
+            
             return extracted_content
             
         except Exception as e:
@@ -153,8 +181,12 @@ class UnstructuredAdvancedProcessor:
         table_counter = 0
         image_counter = 0
         
+        # Debug: Collect all element types found
+        element_types_found = set()
+        
         for i, element in enumerate(elements):
             element_type = type(element).__name__
+            element_types_found.add(element_type)
             
             # Get common metadata
             metadata = getattr(element, 'metadata', None)
@@ -162,7 +194,12 @@ class UnstructuredAdvancedProcessor:
             coordinates = getattr(metadata, 'coordinates', None) if metadata else None
             
             # TEXT EXTRACTION
-            if element_type in ["Title", "NarrativeText", "Header", "Footer", "ListItem"]:
+            # if element_type in ["Title", "NarrativeText", "Header", "Footer", "ListItem"]:
+
+            if element_type in ["Title", "NarrativeText", "Header", "Footer", "ListItem", 
+                    "FigureCaption", "PageNumber", "UncategorizedText", 
+                    "Address", "EmailAddress", "CodeSnippet", "Formula"]:
+
                 text_info = {
                     "text": element.text,
                     "type": element_type,
@@ -171,10 +208,11 @@ class UnstructuredAdvancedProcessor:
                     "element_id": getattr(element, 'id', f"text_{i}")
                 }
                 text_elements.append(text_info)
-            
+
             # TABLE EXTRACTION
             elif element_type == "Table":
                 table_counter += 1
+                print(f"  Processing Table element #{table_counter} on page {page_number}")
                 table_info = self._extract_table_content(element, table_counter, pdf_path, page_number, coordinates)
                 if table_info:
                     tables.append(table_info)
@@ -182,6 +220,7 @@ class UnstructuredAdvancedProcessor:
             # IMAGE EXTRACTION
             elif element_type == "Image":
                 image_counter += 1
+                print(f"  Processing Image element #{image_counter} on page {page_number}")
                 image_info = self._extract_image_content(element, image_counter, pdf_path, page_number, coordinates)
                 if image_info:
                     images.append(image_info)
@@ -191,9 +230,69 @@ class UnstructuredAdvancedProcessor:
         extracted_content["tables"] = tables
         extracted_content["images"] = images
         
+        # Save text content to file
+        self._save_text_content(text_elements, pdf_path)
+        
+        # Debug output
+        print(f"\n  DEBUG: Element types found in document: {sorted(element_types_found)}")
         print(f"✓ Processed {len(text_elements)} text elements")
         print(f"✓ Processed {len(tables)} tables")
         print(f"✓ Processed {len(images)} images")
+    
+    def _save_text_content(self, text_elements: List[Dict], pdf_path: str):
+        """Save text content to a markdown file in the text folder"""
+        try:
+            if not text_elements:
+                print("No text content to save")
+                return
+            
+            # Create markdown content organized by pages
+            markdown_content = []
+            markdown_content.append(f"# Text Extraction from {Path(pdf_path).name}\n\n")
+            
+            # Group text elements by page
+            pages_dict = {}
+            for elem in text_elements:
+                page_num = elem.get('page_number', 'Unknown')
+                if page_num not in pages_dict:
+                    pages_dict[page_num] = []
+                pages_dict[page_num].append(elem)
+            
+            # Write content organized by page
+            for page_num in sorted(pages_dict.keys(), key=lambda x: (x == 'Unknown', x)):
+                markdown_content.append(f"## Page {page_num}\n\n")
+                
+                for elem in pages_dict[page_num]:
+                    elem_type = elem.get('type', 'Text')
+                    text = elem.get('text', '')
+                    
+                    # Format based on element type
+                    if elem_type == "Title":
+                        markdown_content.append(f"### {text}\n\n")
+                    elif elem_type == "Header":
+                        markdown_content.append(f"**{text}**\n\n")
+                    elif elem_type == "ListItem":
+                        markdown_content.append(f"- {text}\n")
+                    else:
+                        markdown_content.append(f"{text}\n\n")
+            
+            # Save to file
+            text_file_path = self.output_dir / "text" / f"{Path(pdf_path).stem}_full_text.md"
+            with open(text_file_path, 'w', encoding='utf-8') as f:
+                f.write(''.join(markdown_content))
+            
+            print(f"✓ Saved text content to {text_file_path}")
+            
+            # Also save a plain text version
+            plain_text_content = '\n'.join([elem.get('text', '') for elem in text_elements])
+            plain_text_path = self.output_dir / "text" / f"{Path(pdf_path).stem}_plain_text.txt"
+            with open(plain_text_path, 'w', encoding='utf-8') as f:
+                f.write(plain_text_content)
+            
+            print(f"✓ Saved plain text to {plain_text_path}")
+            
+        except Exception as e:
+            print(f"Error saving text content: {e}")
     
     def _extract_table_content(self, table_element, table_counter: int, pdf_path: str, page_number, coordinates) -> Dict:
         """Extract comprehensive table information"""
@@ -237,22 +336,70 @@ class UnstructuredAdvancedProcessor:
                 except Exception as e:
                     print(f"Could not convert table {table_counter} to DataFrame: {e}")
             
-            # Extract base64 image if available
-            if metadata and hasattr(metadata, 'image_base64'):
-                try:
-                    image_data = base64.b64decode(metadata.image_base64)
-                    image = Image.open(io.BytesIO(image_data))
+            # Extract image if available (from disk or base64)
+            # Debug: Print available metadata attributes
+            if metadata:
+                available_attrs = [attr for attr in dir(metadata) if not attr.startswith('_')]
+                if table_counter == 1:  # Only print for first table to avoid spam
+                    print(f"  DEBUG: Available metadata attributes for Table: {available_attrs}")
+                
+                # Method 1: Check if image was saved to disk (newer unstructured versions)
+                image_saved = False
+                for attr_name in ['image_path', 'image_file', 'image_filepath']:
+                    if hasattr(metadata, attr_name):
+                        source_image_path = getattr(metadata, attr_name)
+                        if source_image_path and Path(source_image_path).exists():
+                            try:
+                                # Copy/move the image from figures to tables directory
+                                source_path = Path(source_image_path)
+                                target_path = self.output_dir / "tables" / f"{Path(pdf_path).stem}_table_{table_counter}{source_path.suffix}"
+                                
+                                # Open and save to ensure it's in our preferred format
+                                image = Image.open(source_path)
+                                image.save(target_path, "PNG")
+                                
+                                table_info.update({
+                                    "image_file": str(target_path),
+                                    "image_size": image.size,
+                                    "original_path": str(source_path)
+                                })
+                                print(f"  ✓ Saved table {table_counter} image from {source_path.name}")
+                                image_saved = True
+                                break
+                            except Exception as e:
+                                print(f"  Could not copy table {table_counter} image: {e}")
+                
+                # Method 2: Try base64 image data (fallback for older versions or different configs)
+                if not image_saved:
+                    image_base64 = None
+                    if hasattr(metadata, 'image_base64'):
+                        image_base64 = metadata.image_base64
+                    elif hasattr(metadata, 'orig_elements'):
+                        # Try to get image from original elements
+                        orig_elements = metadata.orig_elements
+                        if orig_elements and len(orig_elements) > 0:
+                            for orig_elem in orig_elements:
+                                if hasattr(orig_elem, 'image_base64'):
+                                    image_base64 = orig_elem.image_base64
+                                    break
                     
-                    # Save table image
-                    image_path = self.output_dir / "tables" / f"{Path(pdf_path).stem}_table_{table_counter}_image.png"
-                    image.save(image_path, "PNG")
-                    
-                    table_info.update({
-                        "image_file": str(image_path),
-                        "image_size": image.size
-                    })
-                except Exception as e:
-                    print(f"Could not save table {table_counter} image: {e}")
+                    if image_base64 and isinstance(image_base64, (str, bytes)) and len(str(image_base64).strip()) > 0:
+                        try:
+                            image_data = base64.b64decode(image_base64)
+                            if len(image_data) > 0:  # Ensure we have actual data
+                                image = Image.open(io.BytesIO(image_data))
+                                
+                                # Save table image
+                                image_path = self.output_dir / "tables" / f"{Path(pdf_path).stem}_table_{table_counter}_image.png"
+                                image.save(image_path, "PNG")
+                                
+                                table_info.update({
+                                    "image_file": str(image_path),
+                                    "image_size": image.size
+                                })
+                                print(f"  ✓ Saved table {table_counter} image from base64")
+                        except Exception as e:
+                            print(f"  Could not save table {table_counter} image from base64: {e}")
             
             return table_info
             
@@ -275,25 +422,72 @@ class UnstructuredAdvancedProcessor:
                 "element_id": getattr(image_element, 'id', f"image_{image_counter}")
             }
             
-            # Extract base64 image if available
+            # Extract image if available (from disk or base64)
             metadata = getattr(image_element, 'metadata', None)
-            if metadata and hasattr(metadata, 'image_base64'):
-                try:
-                    image_data = base64.b64decode(metadata.image_base64)
-                    image = Image.open(io.BytesIO(image_data))
+            if metadata:
+                available_attrs = [attr for attr in dir(metadata) if not attr.startswith('_')]
+                if image_counter == 1:  # Only print for first image to avoid spam
+                    print(f"  DEBUG: Available metadata attributes for Image: {available_attrs}")
+                
+                # Method 1: Check if image was saved to disk (newer unstructured versions)
+                image_saved = False
+                for attr_name in ['image_path', 'image_file', 'image_filepath']:
+                    if hasattr(metadata, attr_name):
+                        source_image_path = getattr(metadata, attr_name)
+                        if source_image_path and Path(source_image_path).exists():
+                            try:
+                                # Copy/move the image from figures to images directory
+                                source_path = Path(source_image_path)
+                                target_path = self.output_dir / "images" / f"{Path(pdf_path).stem}_image_{image_counter}{source_path.suffix}"
+                                
+                                # Open and save to ensure it's in our preferred format
+                                image = Image.open(source_path)
+                                image.save(target_path, "PNG")
+                                
+                                image_info.update({
+                                    "image_file": str(target_path),
+                                    "image_size": image.size,
+                                    "format": image.format,
+                                    "original_path": str(source_path)
+                                })
+                                print(f"  ✓ Saved image {image_counter} from {source_path.name}")
+                                image_saved = True
+                                break
+                            except Exception as e:
+                                print(f"  Could not copy image {image_counter}: {e}")
+                
+                # Method 2: Try base64 image data (fallback for older versions or different configs)
+                if not image_saved:
+                    image_base64 = None
+                    if hasattr(metadata, 'image_base64'):
+                        image_base64 = metadata.image_base64
+                    elif hasattr(metadata, 'orig_elements'):
+                        # Try to get image from original elements
+                        orig_elements = metadata.orig_elements
+                        if orig_elements and len(orig_elements) > 0:
+                            for orig_elem in orig_elements:
+                                if hasattr(orig_elem, 'image_base64'):
+                                    image_base64 = orig_elem.image_base64
+                                    break
                     
-                    # Save image
-                    image_path = self.output_dir / "images" / f"{Path(pdf_path).stem}_image_{image_counter}.png"
-                    image.save(image_path, "PNG")
-                    
-                    image_info.update({
-                        "image_file": str(image_path),
-                        "image_size": image.size,
-                        "format": image.format
-                    })
-                    
-                except Exception as e:
-                    print(f"Could not save image {image_counter}: {e}")
+                    if image_base64 and isinstance(image_base64, (str, bytes)) and len(str(image_base64).strip()) > 0:
+                        try:
+                            image_data = base64.b64decode(image_base64)
+                            if len(image_data) > 0:  # Ensure we have actual data
+                                image = Image.open(io.BytesIO(image_data))
+                                
+                                # Save image
+                                image_path = self.output_dir / "images" / f"{Path(pdf_path).stem}_image_{image_counter}.png"
+                                image.save(image_path, "PNG")
+                                
+                                image_info.update({
+                                    "image_file": str(image_path),
+                                    "image_size": image.size,
+                                    "format": image.format
+                                })
+                                print(f"  ✓ Saved image {image_counter} from base64")
+                        except Exception as e:
+                            print(f"  Could not save image {image_counter} from base64: {e}")
             
             # Get additional metadata
             if metadata:
@@ -477,8 +671,8 @@ def process_pdf_with_unstructured_advanced(
     strategy: str = "hi_res", 
     output_dir: str = "./unstructured_output",
     device: str = "auto",  # "auto" (recommended), "cpu", or "cuda"
-    do_ocr: bool = False,  # Set to True for scanned PDFs
-    ocr_languages: list = None  # OCR languages, e.g., ["eng"], ["hun"], ["eng", "hun"]
+    do_ocr: bool = True,  # Set to True for scanned PDFs
+    ocr_languages: list = ["hun"]  # OCR languages, e.g., ["eng"], ["hun"], ["eng", "hun"]
 ):
     """
     Complete workflow for comprehensive PDF processing with Unstructured.io
@@ -534,10 +728,10 @@ def process_pdf_with_unstructured_advanced(
 # Usage examples:
 # Example 1: Text-based PDF with auto device detection (recommended)
 result = process_pdf_with_unstructured_advanced(
-    pdf_path="docs\\DO_NOT_KovSpec.pdf",
+    pdf_path="./docs/DO_NOT_KovSpec.pdf",
     strategy="hi_res",  # Best quality
     device="auto",      # Auto-detect best device (CUDA if available, else CPU)
-    do_ocr=False        # False for text-based PDFs (faster, no tesseract needed)
+    do_ocr=True        # False for text-based PDFs (faster, no tesseract needed)
 )
 
 # Example 2: Scanned PDF with OCR (requires tesseract installation)

@@ -60,7 +60,7 @@ class DoclingAdvancedProcessor:
     def __init__(
         self, 
         embedding_model="all-MiniLM-L6-v2", 
-        output_dir="./extracted_content",
+        output_dir="./docling_output",
         device="auto",  # "cpu", "cuda", or "auto" (auto-detect best available)
         do_ocr=False  # Set to False for text-based PDFs to avoid OCR overhead
     ):
