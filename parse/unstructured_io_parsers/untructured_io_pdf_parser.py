@@ -736,7 +736,7 @@ result = process_pdf_with_unstructured_advanced(
 
 # Example 2: Scanned PDF with OCR (requires tesseract installation)
 # result = process_pdf_with_unstructured_advanced(
-#     pdf_path="docs\\scanned_document.pdf",
+#     pdf_path="./docs/DO_NOT_KovSpec.pdf",
 #     strategy="hi_res",
 #     device="auto",
 #     do_ocr=True,              # Enable OCR for scanned PDFs
@@ -745,7 +745,7 @@ result = process_pdf_with_unstructured_advanced(
 
 # Example 3: Hungarian document with OCR
 # result = process_pdf_with_unstructured_advanced(
-#     pdf_path="docs\\hungarian_scanned.pdf",
+#     pdf_path="./docs/DO_NOT_KovSpec.pdf",
 #     strategy="hi_res",
 #     device="auto",
 #     do_ocr=True,
@@ -754,7 +754,7 @@ result = process_pdf_with_unstructured_advanced(
 
 # Example 4: Multi-language OCR
 # result = process_pdf_with_unstructured_advanced(
-#     pdf_path="docs\\multilang_document.pdf",
+#     pdf_path="./docs/DO_NOT_KovSpec.pdf",
 #     strategy="hi_res",
 #     device="auto",
 #     do_ocr=True,
@@ -763,7 +763,7 @@ result = process_pdf_with_unstructured_advanced(
 
 # Example 5: Fast processing with CPU only
 # result = process_pdf_with_unstructured_advanced(
-#     pdf_path="docs\\DO_NOT_KovSpec.pdf",
+#     pdf_path="./docs/DO_NOT_KovSpec.pdf",
 #     strategy="fast",
 #     device="cpu",      # Force CPU usage
 #     do_ocr=False

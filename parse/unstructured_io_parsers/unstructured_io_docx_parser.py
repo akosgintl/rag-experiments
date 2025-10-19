@@ -690,13 +690,13 @@ def process_docx_with_unstructured_advanced(
 if __name__ == "__main__":
     # Example: Process DOCX file with auto device detection (recommended)
     result = process_docx_with_unstructured_advanced(
-        docx_path="docs\\DO_NOT_KovSpec.docx",
+        docx_path="./docs/DO_NOT_KovSpec.docx",
         device="auto"  # Auto-detect best device (CUDA if available, else CPU)
     )
     
     # Example 2: Force CPU usage
     # result = process_docx_with_unstructured_advanced(
-    #     docx_path="docs\\document.docx",
+    #     docx_path="./docs/DO_NOT_KovSpec.docx",
     #     device="cpu"   # Force CPU usage
     # )
     

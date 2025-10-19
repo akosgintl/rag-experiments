@@ -555,13 +555,13 @@ def process_xlsx_with_unstructured_advanced(
 if __name__ == "__main__":
     # Example: Process XLSX file with auto device detection (recommended)
     result = process_xlsx_with_unstructured_advanced(
-        xlsx_path="docs\\example_workbook.xlsx",
+        xlsx_path="./docs/DO_NOT_KovSpec.xlsx",
         device="auto"  # Auto-detect best device (CUDA if available, else CPU)
     )
     
     # Example 2: Force CPU usage
     # result = process_xlsx_with_unstructured_advanced(
-    #     xlsx_path="docs\\spreadsheet.xlsx",
+    #     xlsx_path="./docs/DO_NOT_KovSpec.xlsx",
     #     device="cpu"   # Force CPU usage
     # )
     
