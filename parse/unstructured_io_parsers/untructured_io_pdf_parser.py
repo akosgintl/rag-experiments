@@ -1,20 +1,20 @@
 # =================================================================
-# UNSTRUCTURED.IO - COMPREHENSIVE TEXT, TABLE, AND IMAGE EXTRACTION
+# UNSTRUCTURED.IO - COMPREHENSIVE TEXT, TABLE, AND IMAGE PARSING
 # =================================================================
 
 # Installation with full capabilities
 # pip install unstructured[pdf,paddleocr] sentence-transformers chromadb
 # pip install pillow pandas openpyxl
 
-# IMAGE EXTRACTION NOTES:
+# IMAGE PARSING NOTES:
 # -----------------------
-# Unstructured.io saves extracted images to disk by default.
+# Unstructured.io saves parsed images to disk by default.
 # - The 'image_output_dir_path' parameter controls where images are saved
 # - By default, images go to a 'figures/' directory if not specified
 # - This script configures it to save to the output directory
 # - Images are then organized into 'images/' and 'tables/' subdirectories
 # - Image metadata contains file paths (image_path, image_file, or image_filepath)
-# - This script handles both disk-based extraction (preferred) and base64 (fallback)
+# - This script handles both disk-based parsing (preferred) and base64 (fallback)
 
 import os
 import json
@@ -72,7 +72,7 @@ class UnstructuredAdvancedProcessor:
         
         Args:
             embedding_model: Name of the SentenceTransformer model
-            output_dir: Directory to save extracted content
+            output_dir: Directory to save parsed content
             device: Device to use for processing ("cpu", "cuda", or "auto")
             do_ocr: Whether to perform OCR (False for text-based PDFs, True for scanned PDFs)
             ocr_languages: List of OCR language codes (e.g., ["eng"], ["hun"])
@@ -94,9 +94,9 @@ class UnstructuredAdvancedProcessor:
         
         print(f"✓ Initialized with device: {self.device}, OCR: {self.do_ocr}")
     
-    def extract_comprehensive_content(self, pdf_path: str, strategy: str = "hi_res") -> Dict[str, Any]:
+    def parse_comprehensive_content(self, pdf_path: str, strategy: str = "hi_res") -> Dict[str, Any]:
         """
-        Extract TEXT, TABLES, and IMAGES comprehensively from PDF using Unstructured
+        Parse TEXT, TABLES, and IMAGES comprehensively from PDF using Unstructured
         """
         try:
             print(f"Processing {pdf_path} with Unstructured.io using '{strategy}' strategy...")
@@ -105,13 +105,13 @@ class UnstructuredAdvancedProcessor:
             partition_params = {
                 "filename": pdf_path,
                 "strategy": strategy,  # "hi_res" for best quality, "auto" for speed
-                "infer_table_structure": True,  # Critical for table extraction
+                "infer_table_structure": True,  # Critical for table parsing
                 "include_page_breaks": True,
                 "extract_images_in_pdf": True,
                 "include_metadata": True,
                 
-                # IMAGE AND TABLE EXTRACTION - KEY PARAMETERS
-                "extract_image_block_types": ["Image", "Table"],  # Extract images from Image and Table blocks
+                # IMAGE AND TABLE PARSING - KEY PARAMETERS
+                "extract_image_block_types": ["Image", "Table"],  # Parse images from Image and Table blocks
                 "image_output_dir_path": str(self.output_dir),  # Save images to output directory
                 
                 # Additional quality settings for hi_res
@@ -129,14 +129,14 @@ class UnstructuredAdvancedProcessor:
             else:
                 print(f"  OCR disabled (text-based PDF mode)")
             
-            # Extract all elements with comprehensive settings
+            # Parse all elements with comprehensive settings
             elements = partition_pdf(**partition_params)
             
             if not elements:
-                print("No elements extracted!")
+                print("No elements parsed!")
                 return None
             
-            extracted_content = {
+            parsed_content = {
                 "text_content": [],
                 "tables": [],
                 "images": [],
@@ -148,7 +148,7 @@ class UnstructuredAdvancedProcessor:
             }
             
             # Process all elements
-            self._process_elements(elements, extracted_content, pdf_path)
+            self._process_elements(elements, parsed_content, pdf_path)
             
             # Clean up any leftover 'figures' directory created by unstructured
             # (images should already be organized into images/ and tables/ directories)
@@ -166,13 +166,13 @@ class UnstructuredAdvancedProcessor:
                 except Exception as e:
                     print(f"  Warning: Could not clean up figures directory: {e}")
             
-            return extracted_content
+            return parsed_content
             
         except Exception as e:
             print(f"Error processing {pdf_path}: {e}")
             return None
     
-    def _process_elements(self, elements: List, extracted_content: Dict, pdf_path: str):
+    def _process_elements(self, elements: List, parsed_content: Dict, pdf_path: str):
         """Process all elements and categorize them"""
         text_elements = []
         tables = []
@@ -193,7 +193,7 @@ class UnstructuredAdvancedProcessor:
             page_number = getattr(metadata, 'page_number', 'Unknown') if metadata else 'Unknown'
             coordinates = getattr(metadata, 'coordinates', None) if metadata else None
             
-            # TEXT EXTRACTION
+            # TEXT PARSING
             # if element_type in ["Title", "NarrativeText", "Header", "Footer", "ListItem"]:
 
             if element_type in ["Title", "NarrativeText", "Header", "Footer", "ListItem", 
@@ -209,26 +209,26 @@ class UnstructuredAdvancedProcessor:
                 }
                 text_elements.append(text_info)
 
-            # TABLE EXTRACTION
+            # TABLE PARSING
             elif element_type == "Table":
                 table_counter += 1
                 print(f"  Processing Table element #{table_counter} on page {page_number}")
-                table_info = self._extract_table_content(element, table_counter, pdf_path, page_number, coordinates)
+                table_info = self._parse_table_content(element, table_counter, pdf_path, page_number, coordinates)
                 if table_info:
                     tables.append(table_info)
             
-            # IMAGE EXTRACTION
+            # IMAGE PARSING
             elif element_type == "Image":
                 image_counter += 1
                 print(f"  Processing Image element #{image_counter} on page {page_number}")
-                image_info = self._extract_image_content(element, image_counter, pdf_path, page_number, coordinates)
+                image_info = self._parse_image_content(element, image_counter, pdf_path, page_number, coordinates)
                 if image_info:
                     images.append(image_info)
         
         # Store processed content
-        extracted_content["text_content"] = text_elements
-        extracted_content["tables"] = tables
-        extracted_content["images"] = images
+        parsed_content["text_content"] = text_elements
+        parsed_content["tables"] = tables
+        parsed_content["images"] = images
         
         # Save text content to file
         self._save_text_content(text_elements, pdf_path)
@@ -248,7 +248,7 @@ class UnstructuredAdvancedProcessor:
             
             # Create markdown content organized by pages
             markdown_content = []
-            markdown_content.append(f"# Text Extraction from {Path(pdf_path).name}\n\n")
+            markdown_content.append(f"# Text Parsing from {Path(pdf_path).name}\n\n")
             
             # Group text elements by page
             pages_dict = {}
@@ -294,8 +294,8 @@ class UnstructuredAdvancedProcessor:
         except Exception as e:
             print(f"Error saving text content: {e}")
     
-    def _extract_table_content(self, table_element, table_counter: int, pdf_path: str, page_number, coordinates) -> Dict:
-        """Extract comprehensive table information"""
+    def _parse_table_content(self, table_element, table_counter: int, pdf_path: str, page_number, coordinates) -> Dict:
+        """Parse comprehensive table information"""
         try:
             table_info = {
                 "id": f"table_{table_counter}",
@@ -336,7 +336,7 @@ class UnstructuredAdvancedProcessor:
                 except Exception as e:
                     print(f"Could not convert table {table_counter} to DataFrame: {e}")
             
-            # Extract image if available (from disk or base64)
+            # Parse image if available (from disk or base64)
             # Debug: Print available metadata attributes
             if metadata:
                 available_attrs = [attr for attr in dir(metadata) if not attr.startswith('_')]
@@ -411,8 +411,8 @@ class UnstructuredAdvancedProcessor:
                 "error": str(e)
             }
     
-    def _extract_image_content(self, image_element, image_counter: int, pdf_path: str, page_number, coordinates) -> Dict:
-        """Extract comprehensive image information"""
+    def _parse_image_content(self, image_element, image_counter: int, pdf_path: str, page_number, coordinates) -> Dict:
+        """Parse comprehensive image information"""
         try:
             image_info = {
                 "id": f"image_{image_counter}",
@@ -422,7 +422,7 @@ class UnstructuredAdvancedProcessor:
                 "element_id": getattr(image_element, 'id', f"image_{image_counter}")
             }
             
-            # Extract image if available (from disk or base64)
+            # Parse image if available (from disk or base64)
             metadata = getattr(image_element, 'metadata', None)
             if metadata:
                 available_attrs = [attr for attr in dir(metadata) if not attr.startswith('_')]
@@ -506,7 +506,7 @@ class UnstructuredAdvancedProcessor:
                 "error": str(e)
             }
     
-    def create_comprehensive_chunks(self, extracted_content: Dict, pdf_path: str, max_characters: int = 1000) -> List[Dict[str, Any]]:
+    def create_comprehensive_chunks(self, parsed_content: Dict, pdf_path: str, max_characters: int = 1000) -> List[Dict[str, Any]]:
         """Create semantic chunks incorporating all content types"""
         chunks = []
         
@@ -514,7 +514,7 @@ class UnstructuredAdvancedProcessor:
         all_elements = []
         
         # Add text elements back to element-like objects for chunking
-        for text_elem in extracted_content.get("text_content", []):
+        for text_elem in parsed_content.get("text_content", []):
             # Create mock element for chunking
             mock_element = type('MockElement', (), {
                 'text': text_elem['text'],
@@ -559,7 +559,7 @@ class UnstructuredAdvancedProcessor:
             except Exception as e:
                 print(f"Semantic chunking failed, using basic chunking: {e}")
                 # Fallback: basic text chunking
-                full_text = " ".join([elem['text'] for elem in extracted_content.get("text_content", [])])
+                full_text = " ".join([elem['text'] for elem in parsed_content.get("text_content", [])])
                 text_chunks = [full_text[i:i+max_characters] for i in range(0, len(full_text), max_characters)]
                 
                 for i, chunk_text in enumerate(text_chunks):
@@ -578,7 +578,7 @@ class UnstructuredAdvancedProcessor:
                     chunks.append(chunk_obj)
         
         # Add table chunks
-        for table in extracted_content.get("tables", []):
+        for table in parsed_content.get("tables", []):
             if table.get("text"):
                 table_text = f"Table {table['id']} (Page {table.get('page_number', 'Unknown')})\\n"
                 table_text += table["text"]
@@ -605,7 +605,7 @@ class UnstructuredAdvancedProcessor:
                 chunks.append(chunk_obj)
         
         # Add image chunks
-        for image in extracted_content.get("images", []):
+        for image in parsed_content.get("images", []):
             if image.get("text"):  # Only if there's caption/alt text
                 image_text = f"Image {image['id']} (Page {image.get('page_number', 'Unknown')})\\n"
                 image_text += image["text"]
@@ -629,40 +629,40 @@ class UnstructuredAdvancedProcessor:
         print(f"✓ Created {len(chunks)} comprehensive chunks")
         return chunks
     
-    def save_extraction_summary(self, extracted_content: Dict, pdf_path: str):
-        """Save detailed extraction summary"""
+    def save_parsing_summary(self, parsed_content: Dict, pdf_path: str):
+        """Save detailed parsing summary"""
         summary = {
             "document": Path(pdf_path).name,
-            "extraction_summary": {
+            "parsing_summary": {
                 "text": {
-                    "elements_count": len(extracted_content.get("text_content", [])),
-                    "types": list(set([elem.get("type", "Unknown") for elem in extracted_content.get("text_content", [])]))
+                    "elements_count": len(parsed_content.get("text_content", [])),
+                    "types": list(set([elem.get("type", "Unknown") for elem in parsed_content.get("text_content", [])]))
                 },
                 "tables": {
-                    "count": len(extracted_content.get("tables", [])),
-                    "with_html": len([t for t in extracted_content.get("tables", []) if t.get("html")]),
-                    "with_csv": len([t for t in extracted_content.get("tables", []) if t.get("csv_file")]),
-                    "with_images": len([t for t in extracted_content.get("tables", []) if t.get("image_file")]),
+                    "count": len(parsed_content.get("tables", [])),
+                    "with_html": len([t for t in parsed_content.get("tables", []) if t.get("html")]),
+                    "with_csv": len([t for t in parsed_content.get("tables", []) if t.get("csv_file")]),
+                    "with_images": len([t for t in parsed_content.get("tables", []) if t.get("image_file")]),
                     "files": {
-                        "csv": [t.get("csv_file") for t in extracted_content.get("tables", []) if t.get("csv_file")],
-                        "html": [t.get("html_file") for t in extracted_content.get("tables", []) if t.get("html_file")],
-                        "images": [t.get("image_file") for t in extracted_content.get("tables", []) if t.get("image_file")]
+                        "csv": [t.get("csv_file") for t in parsed_content.get("tables", []) if t.get("csv_file")],
+                        "html": [t.get("html_file") for t in parsed_content.get("tables", []) if t.get("html_file")],
+                        "images": [t.get("image_file") for t in parsed_content.get("tables", []) if t.get("image_file")]
                     }
                 },
                 "images": {
-                    "count": len(extracted_content.get("images", [])),
-                    "with_files": len([img for img in extracted_content.get("images", []) if img.get("image_file")]),
-                    "files": [img.get("image_file") for img in extracted_content.get("images", []) if img.get("image_file")]
+                    "count": len(parsed_content.get("images", [])),
+                    "with_files": len([img for img in parsed_content.get("images", []) if img.get("image_file")]),
+                    "files": [img.get("image_file") for img in parsed_content.get("images", []) if img.get("image_file")]
                 }
             },
-            "metadata": extracted_content.get("metadata", {})
+            "metadata": parsed_content.get("metadata", {})
         }
         
         summary_path = self.output_dir / f"{Path(pdf_path).stem}_unstructured_summary.json"
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         
-        print(f"✓ Saved extraction summary to {summary_path}")
+        print(f"✓ Saved parsing summary to {summary_path}")
         return summary
 
 # Usage function
@@ -679,8 +679,8 @@ def process_pdf_with_unstructured_advanced(
     
     Args:
         pdf_path: Path to the PDF file
-        strategy: Extraction strategy ("fast", "auto", or "hi_res")
-        output_dir: Directory to save extracted content
+        strategy: Parsing strategy ("fast", "auto", or "hi_res")
+        output_dir: Directory to save parsed content
         device: "auto" (auto-detect), "cpu", or "cuda" for GPU acceleration
         do_ocr: Whether to perform OCR (False for text-based PDFs, True for scanned PDFs)
         ocr_languages: List of OCR language codes (e.g., ["eng"], ["hun"])
@@ -692,16 +692,16 @@ def process_pdf_with_unstructured_advanced(
         ocr_languages=ocr_languages
     )
     
-    # 1. Extract all content types
-    extracted_content = processor.extract_comprehensive_content(pdf_path, strategy)
-    if not extracted_content:
+    # 1. Parse all content types
+    parsed_content = processor.parse_comprehensive_content(pdf_path, strategy)
+    if not parsed_content:
         return None
     
     # 2. Create comprehensive chunks
-    # chunks = processor.create_comprehensive_chunks(extracted_content, pdf_path)
+    # chunks = processor.create_comprehensive_chunks(parsed_content, pdf_path)
     
     # 3. Save summary
-    summary = processor.save_extraction_summary(extracted_content, pdf_path)
+    summary = processor.save_parsing_summary(parsed_content, pdf_path)
     
     # 4. Store in vector database
 #    client = chromadb.PersistentClient(path="./chroma_db")
@@ -719,7 +719,7 @@ def process_pdf_with_unstructured_advanced(
 #        print(f"✓ Stored {len(valid_chunks)} chunks in ChromaDB")
     
     return {
-        "extracted_content": extracted_content,
+        "parsed_content": parsed_content,
         # "chunks": chunks,
         "summary": summary,
         "output_directory": output_dir
@@ -772,9 +772,9 @@ result = process_pdf_with_unstructured_advanced(
 print("\nUNSTRUCTURED.IO Enhanced Example Created")
 print("=" * 70)
 print("Features:")
-print("✓ Comprehensive TEXT extraction with element classification")
-print("✓ Advanced TABLE extraction with HTML structure and CSV conversion")
-print("✓ Complete IMAGE extraction with base64 decoding and file saving")
+print("✓ Comprehensive TEXT parsing with element classification")
+print("✓ Advanced TABLE parsing with HTML structure and CSV conversion")
+print("✓ Complete IMAGE parsing with base64 decoding and file saving")
 print("✓ Semantic chunking using Unstructured's built-in chunking")
 print("✓ Organized file output with subdirectories")
 print("✓ Multiple processing strategies (fast/auto/hi_res)")

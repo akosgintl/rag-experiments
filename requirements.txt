@@ -24,3 +24,7 @@ hf_xet
 
 # Environment variable management
 python-dotenv
+
+# Optional: Performance optimizations (recommended)
+# Uncomment the line below for 3-10x faster JSON serialization:
+orjson

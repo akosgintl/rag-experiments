@@ -1,5 +1,5 @@
 # ============================================================
-# MARKITDOWN - COMPREHENSIVE TEXT, TABLE, AND IMAGE EXTRACTION
+# MARKITDOWN - COMPREHENSIVE TEXT, TABLE, AND IMAGE PARSING
 # ============================================================
 
 # Installation with full capabilities
@@ -15,15 +15,12 @@ import re
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from markitdown.converters import DocxConverter
 import pandas as pd
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 from markitdown import MarkItDown
 from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from sentence_transformers import SentenceTransformer
-import chromadb
 from openai import OpenAI
 
 # Load environment variables from .env file
@@ -31,7 +28,7 @@ load_dotenv()
 
 class MarkItDownAdvancedProcessor:
     def __init__(self, embedding_model="all-MiniLM-L6-v2", openai_client: Optional[OpenAI] = None, 
-                 output_dir="./markitdown_output"):
+                 output_dir="./markitdown_docx_output"):
         # Initialize with or without OpenAI for enhanced image processing
         if openai_client:
             self.md = MarkItDown(llm_client=openai_client, llm_model="gpt-4o")
@@ -67,9 +64,9 @@ class MarkItDownAdvancedProcessor:
             strip_headers=False
         )
     
-    def extract_comprehensive_content(self, docx_path: str) -> Dict[str, Any]:
+    def parse_comprehensive_content(self, docx_path: str) -> Dict[str, Any]:
         """
-        Extract TEXT, TABLES, and IMAGES from DOCX using MarkItDown
+        Parse TEXT, TABLES, and IMAGES from DOCX using MarkItDown
         Note: MarkItDown has limitations for images and tables compared to other frameworks
         """
         try:
@@ -78,7 +75,7 @@ class MarkItDownAdvancedProcessor:
             # Convert DOCX to Markdown
             result = self.md.convert(docx_path)
             
-            extracted_content = {
+            parsed_content = {
                 "text_content": {"full_markdown": result.markdown},
                 "tables": [],
                 "images": [],
@@ -95,12 +92,12 @@ class MarkItDownAdvancedProcessor:
             with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(result.markdown)
 
-            # Analyze and extract different content types
-            self._extract_text_content(result.markdown, extracted_content, docx_path)
-            self._extract_tables(result.markdown, extracted_content, docx_path)
-            self._extract_image_references(result.markdown, extracted_content, docx_path)
+            # Analyze and parse different content types
+            self._parse_text_content(result.markdown, parsed_content, docx_path)
+            self._parse_tables(result.markdown, parsed_content, docx_path)
+            self._parse_image_references(result.markdown, parsed_content, docx_path)
             
-            return extracted_content
+            return parsed_content
             
         except Exception as e:
             print(f"Error processing {docx_path}: {e}")
@@ -115,8 +112,8 @@ class MarkItDownAdvancedProcessor:
                 }
             }
     
-    def _extract_text_content(self, markdown_content: str, extracted_content: Dict, docx_path: str):
-        """Extract and analyze text content structure"""
+    def _parse_text_content(self, markdown_content: str, parsed_content: Dict, docx_path: str):
+        """Parse and analyze text content structure"""
         
         # Basic text analysis
         analysis = {
@@ -181,15 +178,15 @@ class MarkItDownAdvancedProcessor:
                     "section": current_section.copy()
                 })
         
-        extracted_content["text_content"].update({
+        parsed_content["text_content"].update({
             "analysis": analysis,
             "elements": elements
         })
         
-        print(f"✓ Analyzed text: {analysis['word_count']} words, {len(elements)} elements")
+        print(f"✓ Parsed text: {analysis['word_count']} words, {len(elements)} elements")
     
-    def _extract_tables(self, markdown_content: str, extracted_content: Dict, docx_path: str):
-        """Extract tables from Markdown content"""
+    def _parse_tables(self, markdown_content: str, parsed_content: Dict, docx_path: str):
+        """Parse tables from Markdown content"""
         tables = []
         table_counter = 0
         
@@ -258,11 +255,11 @@ class MarkItDownAdvancedProcessor:
                     "error": str(e)
                 })
         
-        extracted_content["tables"] = tables
-        print(f"✓ Extracted {len(tables)} tables")
+        parsed_content["tables"] = tables
+        print(f"✓ Parsed {len(tables)} tables")
     
-    def _extract_image_references(self, markdown_content: str, extracted_content: Dict, docx_path: str):
-        """Extract image references and descriptions from Markdown"""
+    def _parse_image_references(self, markdown_content: str, parsed_content: Dict, docx_path: str):
+        """Parse image references and descriptions from Markdown"""
         images = []
         
         # Find markdown image syntax: ![alt text](image_path)
@@ -310,19 +307,19 @@ class MarkItDownAdvancedProcessor:
                 }
                 images.append(image_info)
         
-        extracted_content["images"] = images
-        print(f"✓ Found {len(images)} image references/descriptions")
+        parsed_content["images"] = images
+        print(f"✓ Parsed {len(images)} image references/descriptions")
     
-    def create_comprehensive_chunks(self, extracted_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
+    def create_comprehensive_chunks(self, parsed_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
         """Create chunks using header-based semantic chunking when possible"""
         chunks = []
         
-        markdown_content = extracted_content.get("text_content", {}).get("full_markdown", "")
+        markdown_content = parsed_content.get("text_content", {}).get("full_markdown", "")
         if not markdown_content:
             return chunks
         
         # Determine chunking strategy based on structure
-        analysis = extracted_content.get("text_content", {}).get("analysis", {})
+        analysis = parsed_content.get("text_content", {}).get("analysis", {})
         has_headers = sum(analysis.get("headers", {}).values()) > 0
         
         if has_headers:
@@ -333,11 +330,11 @@ class MarkItDownAdvancedProcessor:
             chunks = self._chunk_by_characters(markdown_content, docx_path)
         
         # Add table chunks
-        table_chunks = self._create_table_chunks(extracted_content, docx_path)
+        table_chunks = self._create_table_chunks(parsed_content, docx_path)
         chunks.extend(table_chunks)
         
         # Add image description chunks
-        image_chunks = self._create_image_chunks(extracted_content, docx_path)
+        image_chunks = self._create_image_chunks(parsed_content, docx_path)
         chunks.extend(image_chunks)
         
         print(f"✓ Created {len(chunks)} comprehensive chunks")
@@ -413,11 +410,11 @@ class MarkItDownAdvancedProcessor:
         
         return chunks
     
-    def _create_table_chunks(self, extracted_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
+    def _create_table_chunks(self, parsed_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
         """Create chunks for tables"""
         chunks = []
         
-        for table in extracted_content.get("tables", []):
+        for table in parsed_content.get("tables", []):
             if table.get("markdown"):
                 table_text = f"Table {table['id']}\n{table['markdown']}"
                 
@@ -440,11 +437,11 @@ class MarkItDownAdvancedProcessor:
         
         return chunks
     
-    def _create_image_chunks(self, extracted_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
+    def _create_image_chunks(self, parsed_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
         """Create chunks for image descriptions"""
         chunks = []
         
-        for image in extracted_content.get("images", []):
+        for image in parsed_content.get("images", []):
             description = image.get("llm_description") or image.get("description") or image.get("alt_text")
             if description and description.strip():
                 image_text = f"Image {image['id']}: {description}"
@@ -466,44 +463,44 @@ class MarkItDownAdvancedProcessor:
         
         return chunks
     
-    def save_extraction_summary(self, extracted_content: Dict, docx_path: str):
-        """Save extraction summary"""
-        analysis = extracted_content.get("text_content", {}).get("analysis", {})
+    def save_parsing_summary(self, parsed_content: Dict, docx_path: str):
+        """Save parsing summary"""
+        analysis = parsed_content.get("text_content", {}).get("analysis", {})
         
         summary = {
             "document": Path(docx_path).name,
-            "extraction_summary": {
+            "parsing_summary": {
                 "text": {
                     "word_count": analysis.get("word_count", 0),
                     "character_count": analysis.get("character_count", 0),
-                    "elements_count": len(extracted_content.get("text_content", {}).get("elements", [])),
+                    "elements_count": len(parsed_content.get("text_content", {}).get("elements", [])),
                     "headers": analysis.get("headers", {}),
                     "structure_detected": sum(analysis.get("headers", {}).values()) > 0
                 },
                 "tables": {
-                    "count": len(extracted_content.get("tables", [])),
-                    "with_data": len([t for t in extracted_content.get("tables", []) if t.get("data")]),
-                    "files": [t.get("csv_file") for t in extracted_content.get("tables", []) if t.get("csv_file")]
+                    "count": len(parsed_content.get("tables", [])),
+                    "with_data": len([t for t in parsed_content.get("tables", []) if t.get("data")]),
+                    "files": [t.get("csv_file") for t in parsed_content.get("tables", []) if t.get("csv_file")]
                 },
                 "images": {
-                    "count": len(extracted_content.get("images", [])),
-                    "with_descriptions": len([img for img in extracted_content.get("images", []) if img.get("description") or img.get("llm_description")]),
-                    "enhanced_with_llm": len([img for img in extracted_content.get("images", []) if img.get("enhanced")])
+                    "count": len(parsed_content.get("images", [])),
+                    "with_descriptions": len([img for img in parsed_content.get("images", []) if img.get("description") or img.get("llm_description")]),
+                    "enhanced_with_llm": len([img for img in parsed_content.get("images", []) if img.get("enhanced")])
                 }
             },
-            "metadata": extracted_content.get("metadata", {})
+            "metadata": parsed_content.get("metadata", {})
         }
         
         summary_path = self.output_dir / f"{Path(docx_path).stem}_markitdown_summary.json"
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         
-        print(f"✓ Saved extraction summary to {summary_path}")
+        print(f"✓ Saved parsing summary to {summary_path}")
         return summary
 
 # Usage function
-def process_pdf_with_markitdown_advanced(docx_path: str, openai_api_key: Optional[str] = None, 
-                                        output_dir: str = "./markitdown_output"):
+def process_docx_with_markitdown_advanced(docx_path: str, openai_api_key: Optional[str] = None, 
+                                        output_dir: str = "./markitdown_docx_output"):
     """
     Complete workflow for comprehensive DOCX processing with MarkItDown
     
@@ -519,16 +516,16 @@ def process_pdf_with_markitdown_advanced(docx_path: str, openai_api_key: Optiona
     openai_client = OpenAI(api_key=api_key) if api_key else None
     processor = MarkItDownAdvancedProcessor(openai_client=openai_client, output_dir=output_dir)
     
-    # 1. Extract all content types
-    extracted_content = processor.extract_comprehensive_content(docx_path)
-    if not extracted_content:
+    # 1. Parse all content types
+    parsed_content = processor.parse_comprehensive_content(docx_path)
+    if not parsed_content:
         return None
     
     # 2. Create comprehensive chunks
-    # chunks = processor.create_comprehensive_chunks(extracted_content, docx_path)
+    # chunks = processor.create_comprehensive_chunks(parsed_content, docx_path)
     
     # 3. Save summary
-    summary = processor.save_extraction_summary(extracted_content, docx_path)
+    summary = processor.save_parsing_summary(parsed_content, docx_path)
     
     # 4. Store in vector database
 #    client = chromadb.PersistentClient(path="./chroma_db")
@@ -546,7 +543,7 @@ def process_pdf_with_markitdown_advanced(docx_path: str, openai_api_key: Optiona
 #        print(f"✓ Stored {len(valid_chunks)} chunks in ChromaDB")
     
     return {
-        "extracted_content": extracted_content,
+        "parsed_content": parsed_content,
         # "chunks": chunks,
         "summary": summary,
         "output_directory": output_dir
@@ -554,25 +551,25 @@ def process_pdf_with_markitdown_advanced(docx_path: str, openai_api_key: Optiona
 
 # Usage examples:
 # Basic usage (no LLM for images)
-result = process_pdf_with_markitdown_advanced("docs\\DO_NOT_KovSpec.docx", openai_api_key=None, output_dir="./markitdown_output")
+result = process_docx_with_markitdown_advanced("docs\\DO_NOT_KovSpec.docx", openai_api_key=None, output_dir="./markitdown_docx_output")
 
 # With OpenAI for enhanced image processing (API key from .env file)
-# result = process_pdf_with_markitdown_advanced("docs\\DO_NOT_KovSpec.docx")
+# result = process_docx_with_markitdown_advanced("docs\\DO_NOT_KovSpec.docx")
 
 # With OpenAI for enhanced image processing (API key passed directly)
-# result = process_pdf_with_markitdown_advanced("docs\\DO_NOT_KovSpec.docx", openai_api_key="sk-proj-1234567890")
+# result = process_docx_with_markitdown_advanced("docs\\DO_NOT_KovSpec.docx", openai_api_key="sk-proj-1234567890")
 
 
 print("\nMARKITDOWN Enhanced Example Created")
 print("=" * 70)
 print("Features:")
-print("✓ Comprehensive TEXT extraction with structure analysis")
-print("✓ TABLE extraction from Markdown tables with CSV conversion")
-print("✓ IMAGE reference extraction and optional LLM-enhanced descriptions")
+print("✓ Comprehensive TEXT parsing with structure analysis")
+print("✓ TABLE parsing from Markdown tables with CSV conversion")
+print("✓ IMAGE reference parsing and optional LLM-enhanced descriptions")
 print("✓ Header-based semantic chunking with fallback")
 print("✓ Markdown structure preservation")
 print("✓ Optional OpenAI integration for better image understanding")
 print("✓ Lightweight processing suitable for simpler documents")
 print("\nNote: MarkItDown has more limited table/image capabilities")
 print("compared to Docling and Unstructured.io, but excels at clean")
-print("text extraction and Markdown conversion.")
+print("text parsing and Markdown conversion.")

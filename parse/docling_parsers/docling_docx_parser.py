@@ -1,35 +1,39 @@
 # =========================================================
-# DOCLING - COMPREHENSIVE TEXT, TABLE, AND IMAGE EXTRACTION
+# DOCLING - COMPREHENSIVE TEXT, TABLE, AND IMAGE PARSING FOR DOCX
 # =========================================================
 #
 # This script uses the latest Docling API (updated 2025):
 # - TableItem.export_to_dataframe(document) - requires document parameter
-# - TableItem.export_to_markdown(document) - for extracting table text
+# - TableItem.export_to_markdown(document) - for parsing table text
 # - No warnings or errors with current Docling version
 #
 # Installation with full capabilities:
 # pip install docling[vlm] docling-core sentence-transformers chromadb
-# pip install pillow pandas openpyxl tabulate
+# pip install pillow pandas openpyxl tabulate python-docx
+#
+# Performance optimizations:
+# pip install orjson  # 3-10x faster JSON serialization
 
-import os
 import json
-import base64
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
-import pandas as pd
-from PIL import Image
-import io
+from typing import List, Dict, Any
 import torch
 
-from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.document_converter import DocumentConverter, WordFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractOcrOptions, RapidOcrOptions, OcrMacOptions, TesseractCliOcrOptions, EasyOcrOptions
-from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
+from docling.datamodel.pipeline_options import PaginatedPipelineOptions
+from docling.datamodel.accelerator_options import AcceleratorOptions
+from docling_core.types.doc import PictureItem, TableItem, ImageRefMode
 from docling_core.types.doc.document import DoclingDocument
-from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
-import chromadb
+
+# Try to use faster JSON library
+try:
+    import orjson
+    USE_ORJSON = True
+except ImportError:
+    USE_ORJSON = False
 
 def get_available_device(preferred_device: str = "cuda") -> str:
     """
@@ -56,51 +60,49 @@ def get_available_device(preferred_device: str = "cuda") -> str:
     
     return "cpu"
 
-class DoclingAdvancedProcessor:
+class DoclingDocxProcessor:
     def __init__(
         self, 
         embedding_model="all-MiniLM-L6-v2", 
-        output_dir="./docling_output",
+        output_dir="./docling_docx_output",
         device="auto",  # "cpu", "cuda", or "auto" (auto-detect best available)
-        do_ocr=False  # Set to False for text-based PDFs to avoid OCR overhead
+        # Performance options
+        num_threads=8,  # Number of threads for parallel processing (default: 16)
+        generate_picture_images=True,  # Extract images (set False to speed up)
+        images_scale=1.0,  # Image resolution scale (1.0=normal, 2.0=high-res but slower)
+        image_ref_mode=ImageRefMode.EMBEDDED  # How to handle images in document
     ):
         """
-        Initialize the DoclingAdvancedProcessor
+        Initialize the DoclingDocxProcessor with performance optimizations
         
         Args:
             embedding_model: Name of the SentenceTransformer model
-            output_dir: Directory to save extracted content
+            output_dir: Directory to save parsed content
             device: Device to use for processing ("cpu", "cuda", or "auto")
-            do_ocr: Whether to perform OCR (set False for text-based PDFs)
+            num_threads: Number of threads for parallel processing (higher = faster)
+            generate_picture_images: Extract images from document (False = faster)
+            images_scale: Image resolution multiplier (lower = faster)
+            image_ref_mode: How to embed images in document
         """
         # Auto-detect or validate device availability
         self.device = get_available_device(device)
         
-        # Configure pipeline for comprehensive extraction
-        self.pipeline_options = PdfPipelineOptions()
-        self.pipeline_options.images_scale = 2.0  # High-res images (2x scale)
-        self.pipeline_options.generate_page_images = True
-        self.pipeline_options.generate_picture_images = True
-        self.pipeline_options.generate_table_images = True
-        self.pipeline_options.do_ocr = do_ocr  # Control OCR
-        # Any of the OCR options can be used: EasyOcrOptions, TesseractOcrOptions, TesseractCliOcrOptions, OcrMacOptions (macOS only), RapidOcrOptions
-        # ocr_options = EasyOcrOptions(force_full_page_ocr=True, lang=["hu"])
-        # ocr_options = TesseractOcrOptions(force_full_page_ocr=True, lang=["hu"])
-        # ocr_options = OcrMacOptions(force_full_page_ocr=True, lang=["hu"])
-        # ocr_options = RapidOcrOptions(force_full_page_ocr=True, lang=["hu"])
-        # ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True, lang=["hu"])
-        # self.pipeline_options.ocr_options = ocr_options
-        self.pipeline_options.do_table_structure = True  # Control table structure extraction
-        self.pipeline_options.table_structure_options.do_cell_matching = True  # Control cell matching
-        self.pipeline_options.accelerator_options = AcceleratorOptions(num_threads=8, device=device)  # Control accelerator options
-        
-        # Initialize converter with pipeline options
-        self.converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=self.pipeline_options)
-            }
+        # Configure pipeline for performance
+        pipeline_options = PaginatedPipelineOptions()
+        pipeline_options.images_scale = images_scale
+        pipeline_options.generate_picture_images = generate_picture_images
+        pipeline_options.accelerator_options = AcceleratorOptions(
+            num_threads=num_threads,
+            device=device
         )
         
+        # Initialize converter with optimized pipeline
+        self.converter = DocumentConverter(
+            format_options={
+                InputFormat.DOCX: WordFormatOption(pipeline_options=pipeline_options)
+            }
+        )
+
         # Initialize embedder with device support
         self.embedder = SentenceTransformer(embedding_model, device=self.device)
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -112,63 +114,69 @@ class DoclingAdvancedProcessor:
         
         # Create subdirectories for organized output
         self.tables_dir = self.output_dir / "tables"
-        self.pages_dir = self.output_dir / "pages"
         self.figures_dir = self.output_dir / "figures"
         self.text_dir = self.output_dir / "text"
         
         self.tables_dir.mkdir(exist_ok=True, parents=True)
-        self.pages_dir.mkdir(exist_ok=True, parents=True)
         self.figures_dir.mkdir(exist_ok=True, parents=True)
         self.text_dir.mkdir(exist_ok=True, parents=True)
 
-        print(f"✓ Initialized with device: {self.device}, OCR: {do_ocr}")
+        perf_info = f"threads={num_threads}, images={generate_picture_images}, scale={images_scale}"
+        print(f"✓ Initialized DOCX processor with device: {self.device} ({perf_info})")
+        if USE_ORJSON:
+            print(f"✓ Using orjson for fast JSON serialization")
     
-    def extract_comprehensive_content(self, pdf_path: str) -> Dict[str, Any]:
+    def parse_comprehensive_content(self, docx_path: str) -> Dict[str, Any]:
         """
-        Extract TEXT, TABLES, and IMAGES comprehensively from PDF
+        Parse TEXT, TABLES, and IMAGES comprehensively from DOCX
         """
         try:
-            print(f"Processing {pdf_path} with Docling...")
-            result = self.converter.convert(pdf_path)
+            print(f"Processing {docx_path} with Docling...")
+            result = self.converter.convert(docx_path)
             document = result.document
+                      
+            # Export and save JSON
+            json_path = self.output_dir / f"{Path(docx_path).stem}_full.json"
+            document.save_as_json(json_path)
             
-            extracted_content = {
+            print(f"✓ Saved full JSON to {json_path}")
+
+            parsed_content = {
                 "text_content": [],
                 "tables": [],
                 "images": [],
                 "metadata": {
-                    "source": pdf_path,
-                    "total_pages": len(document.pages) if hasattr(document, 'pages') else 0,
-                    "title": getattr(document, 'title', Path(pdf_path).stem)
+                    "source": docx_path,
+                    "title": getattr(document, 'title', Path(docx_path).stem)
                 }
             }
             
-            # Extract different content types
-            self._extract_text_content(document, extracted_content, pdf_path)
-            self._extract_tables(document, extracted_content, pdf_path)
-            self._extract_images(document, extracted_content, pdf_path)
+            # Parse different content types
+            self._parse_text_content(document, parsed_content, docx_path)
+            self._parse_tables(document, parsed_content, docx_path)
+            self._parse_images(document, parsed_content, docx_path)
             
-            return extracted_content
+            return parsed_content
             
         except Exception as e:
-            print(f"Error processing {pdf_path}: {e}")
+            print(f"Error processing {docx_path}: {e}")
             return None
     
-    def _extract_text_content(self, document: DoclingDocument, extracted_content: Dict, pdf_path: str):
-        """Extract and process text content"""
+    def _parse_text_content(self, document: DoclingDocument, parsed_content: Dict, docx_path: str):
+        """Parse and process text content"""
         # Get full text as markdown
         full_text = document.export_to_markdown()
-        extracted_content["text_content"] = {
+        parsed_content["text_content"] = {
             "full_markdown": full_text,
             "word_count": len(full_text.split()),
             "char_count": len(full_text)
         }
         
-        # Extract text by elements for detailed analysis
+        # Parse text by elements for detailed analysis
         text_elements = []
         for element, level in document.iterate_items():
             if hasattr(element, 'text') and element.text.strip():
-                # Get page number from provenance
+                # Get page number from provenance if available
                 page_no = 'Unknown'
                 if hasattr(element, 'prov') and element.prov:
                     prov_item = element.prov[0]
@@ -182,27 +190,19 @@ class DoclingAdvancedProcessor:
                 }
                 text_elements.append(element_info)
 
-        extracted_content["text_content"]["elements"] = text_elements
+        parsed_content["text_content"]["elements"] = text_elements
 
         # Save full text as markdown
         if full_text:
-            txt_path = self.text_dir / f"{Path(pdf_path).stem}_full_text.md"
+            txt_path = self.text_dir / f"{Path(docx_path).stem}_full_text.md"
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(full_text)
-            extracted_content["text_content"]["full_text_file"] = str(txt_path)
+            parsed_content["text_content"]["full_text_file"] = str(txt_path)
 
-        # Save text elements as markdown
-        #if text_elements:
-        #    for i, element in enumerate(text_elements):
-        #        txt_path = self.text_dir / f"{Path(pdf_path).stem}_text_element_{i}.md"
-        #        with open(txt_path, 'w', encoding='utf-8') as f:
-        #            f.write(element['text'])
-        #        text_elements[i]['text_file'] = str(txt_path)
-
-        print(f"✓ Extracted {len(text_elements)} text elements")
+        print(f"✓ Parsed {len(text_elements)} text elements")
     
-    def _extract_tables(self, document: DoclingDocument, extracted_content: Dict, pdf_path: str):
-        """Extract tables with structure preservation"""
+    def _parse_tables(self, document: DoclingDocument, parsed_content: Dict, docx_path: str):
+        """Parse tables with structure preservation"""
         tables = []
         table_counter = 0
         
@@ -210,7 +210,7 @@ class DoclingAdvancedProcessor:
             if isinstance(element, TableItem):
                 table_counter += 1
                 
-                # Extract table data
+                # Parse table data
                 try:
                     # Get DataFrame if possible (using document parameter for latest API)
                     df = None
@@ -252,16 +252,16 @@ class DoclingAdvancedProcessor:
                     
                     # Save table as CSV
                     if table_csv:
-                        csv_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.csv"
+                        csv_path = self.tables_dir / f"{Path(docx_path).stem}_table_{table_counter}.csv"
                         with open(csv_path, 'w', encoding='utf-8') as f:
                             f.write(table_csv)
                         table_info["csv_file"] = str(csv_path)
                     
                     # Save table content as markdown
                     if df is not None:
-                        md_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.md"
+                        md_path = self.tables_dir / f"{Path(docx_path).stem}_table_{table_counter}.md"
                         table_markdown = f"# Table {table_counter}\n\n"
-                        table_markdown += f"**Source:** {Path(pdf_path).name}\n"
+                        table_markdown += f"**Source:** {Path(docx_path).name}\n"
                         table_markdown += f"**Page:** {page_no}\n"
                         table_markdown += f"**Dimensions:** {len(df)} rows × {len(df.columns)} columns\n\n"
                         table_markdown += "## Table Content\n\n"
@@ -279,7 +279,7 @@ class DoclingAdvancedProcessor:
                         try:
                             table_image = element.get_image(document)
                             if table_image:
-                                image_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.png"
+                                image_path = self.tables_dir / f"{Path(docx_path).stem}_table_{table_counter}.png"
                                 table_image.save(image_path, "PNG")
                                 table_info["image_file"] = str(image_path)
                         except Exception as e:
@@ -297,34 +297,16 @@ class DoclingAdvancedProcessor:
                         "error": str(e)
                     })
         
-        extracted_content["tables"] = tables
+        parsed_content["tables"] = tables
         markdown_count = sum(1 for t in tables if t.get("markdown_file"))
-        print(f"✓ Extracted {len(tables)} tables ({markdown_count} with markdown files)")
+        print(f"✓ Parsed {len(tables)} tables ({markdown_count} with markdown files)")
     
-    def _extract_images(self, document: DoclingDocument, extracted_content: Dict, pdf_path: str):
-        """Extract images and figures"""
+    def _parse_images(self, document: DoclingDocument, parsed_content: Dict, docx_path: str):
+        """Parse images and figures"""
         images = []
         image_counter = 0
         
-        # Extract page images
-        if hasattr(document, 'pages'):
-            for page_no, page in document.pages.items():
-                if hasattr(page, 'image') and page.image:
-                    try:
-                        page_image_path = self.pages_dir / f"{Path(pdf_path).stem}_page_{page_no}.png"
-                        page.image.pil_image.save(page_image_path, "PNG")
-                        
-                        images.append({
-                            "type": "page",
-                            "id": f"page_{page_no}",
-                            "page_number": page_no,
-                            "file_path": str(page_image_path),
-                            "size": page.image.pil_image.size if hasattr(page.image, 'pil_image') else None
-                        })
-                    except Exception as e:
-                        print(f"Could not save page {page_no} image: {e}")
-        
-        # Extract figure/picture images
+        # Parse figure/picture images
         for element, level in document.iterate_items():
             if isinstance(element, PictureItem):
                 image_counter += 1
@@ -333,7 +315,7 @@ class DoclingAdvancedProcessor:
                     # Get image
                     image = element.get_image(document)
                     if image:
-                        image_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.png"
+                        image_path = self.figures_dir / f"{Path(docx_path).stem}_figure_{image_counter}.png"
                         image.save(image_path, "PNG")
                         
                         # Get metadata from provenance
@@ -364,10 +346,10 @@ class DoclingAdvancedProcessor:
                         }
                         
                         # Always save a text file for each figure (with or without caption)
-                        txt_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.txt"
+                        txt_path = self.figures_dir / f"{Path(docx_path).stem}_figure_{image_counter}.txt"
                         caption_text = f"Figure {image_counter}\n"
                         caption_text += f"{'=' * 60}\n\n"
-                        caption_text += f"Source: {Path(pdf_path).name}\n"
+                        caption_text += f"Source: {Path(docx_path).name}\n"
                         caption_text += f"Page: {page_no}\n"
                         caption_text += f"Size: {image.size[0]}x{image.size[1]} pixels\n\n"
                         
@@ -385,37 +367,36 @@ class DoclingAdvancedProcessor:
                 except Exception as e:
                     print(f"Error processing image {image_counter}: {e}")
         
-        extracted_content["images"] = images
+        parsed_content["images"] = images
         text_count = sum(1 for img in images if img.get("text_file"))
-        figure_count = sum(1 for img in images if img.get("type") == "figure")
-        print(f"✓ Extracted {len(images)} images ({figure_count} figures with text files, {text_count} total text files)")
+        print(f"✓ Parsed {len(images)} images ({text_count} with text files)")
     
-    def create_comprehensive_chunks(self, extracted_content: Dict, pdf_path: str) -> List[Dict[str, Any]]:
+    def create_comprehensive_chunks(self, parsed_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
         """Create chunks incorporating text, tables, and images"""
         chunks = []
         chunk_counter = 0
         
         # Text chunks
-        if extracted_content.get("text_content", {}).get("full_markdown"):
-            text_chunks = self.text_splitter.split_text(extracted_content["text_content"]["full_markdown"])
+        if parsed_content.get("text_content", {}).get("full_markdown"):
+            text_chunks = self.text_splitter.split_text(parsed_content["text_content"]["full_markdown"])
             
             for i, chunk in enumerate(text_chunks):
                 chunk_obj = {
-                    "id": f"{Path(pdf_path).stem}_text_chunk_{i}",
+                    "id": f"{Path(docx_path).stem}_text_chunk_{i}",
                     "type": "text",
                     "content": chunk,
                     "embedding": self.embedder.encode(chunk).tolist(),
                     "metadata": {
                         "chunk_index": i,
                         "content_type": "text",
-                        "source": pdf_path,
+                        "source": docx_path,
                         "chunk_size": len(chunk)
                     }
                 }
                 chunks.append(chunk_obj)
         
         # Table chunks
-        for table in extracted_content.get("tables", []):
+        for table in parsed_content.get("tables", []):
             # Create chunk for table if it has text or CSV data
             if table.get("text") or table.get("csv"):
                 # Create chunk for table text content
@@ -435,7 +416,7 @@ class DoclingAdvancedProcessor:
                         table_text += "\\n... (truncated)"
                 
                 chunk_obj = {
-                    "id": f"{Path(pdf_path).stem}_table_chunk_{table['id']}",
+                    "id": f"{Path(docx_path).stem}_table_chunk_{table['id']}",
                     "type": "table",
                     "content": table_text,
                     "embedding": self.embedder.encode(table_text).tolist(),
@@ -448,14 +429,14 @@ class DoclingAdvancedProcessor:
                         "csv_file": table.get("csv_file"),
                         "markdown_file": table.get("markdown_file"),
                         "image_file": table.get("image_file"),
-                        "source": pdf_path
+                        "source": docx_path
                     }
                 }
                 chunks.append(chunk_obj)
         
         # Image chunks (for figures with text files)
-        for image in extracted_content.get("images", []):
-            # Only create chunks for figures (not pages) that have text files
+        for image in parsed_content.get("images", []):
+            # Only create chunks for figures that have text files
             if image.get("type") == "figure" and image.get("text_file"):
                 image_text = f"Image {image['id']}"
                 if image.get("page_number"):
@@ -468,7 +449,7 @@ class DoclingAdvancedProcessor:
                     image_text += " (Figure from document - no caption detected)"
                 
                 chunk_obj = {
-                    "id": f"{Path(pdf_path).stem}_image_chunk_{image['id']}",
+                    "id": f"{Path(docx_path).stem}_image_chunk_{image['id']}",
                     "type": "image",
                     "content": image_text,
                     "embedding": self.embedder.encode(image_text).tolist(),
@@ -479,7 +460,7 @@ class DoclingAdvancedProcessor:
                         "image_file": image["file_path"],
                         "text_file": image.get("text_file"),
                         "image_size": image.get("size"),
-                        "source": pdf_path
+                        "source": docx_path
                     }
                 }
                 chunks.append(chunk_obj)
@@ -487,82 +468,101 @@ class DoclingAdvancedProcessor:
         print(f"✓ Created {len(chunks)} comprehensive chunks")
         return chunks
         
-    def save_extraction_summary(self, extracted_content: Dict, pdf_path: str):
-        """Save a summary of extracted content"""
+    def save_parsing_summary(self, parsed_content: Dict, docx_path: str):
+        """Save a summary of parsed content"""
         summary = {
-            "document": Path(pdf_path).name,
-            "extraction_summary": {
+            "document": Path(docx_path).name,
+            "parsing_summary": {
                 "text": {
-                    "elements_count": len(extracted_content.get("text_content", {}).get("elements", [])),
-                    "word_count": extracted_content.get("text_content", {}).get("word_count", 0),
-                    "char_count": extracted_content.get("text_content", {}).get("char_count", 0)
+                    "elements_count": len(parsed_content.get("text_content", {}).get("elements", [])),
+                    "word_count": parsed_content.get("text_content", {}).get("word_count", 0),
+                    "char_count": parsed_content.get("text_content", {}).get("char_count", 0)
                 },
                 "tables": {
-                    "count": len(extracted_content.get("tables", [])),
-                    "csv_files": [t.get("csv_file") for t in extracted_content.get("tables", []) if t.get("csv_file")],
-                    "markdown_files": [t.get("markdown_file") for t in extracted_content.get("tables", []) if t.get("markdown_file")]
+                    "count": len(parsed_content.get("tables", [])),
+                    "csv_files": [t.get("csv_file") for t in parsed_content.get("tables", []) if t.get("csv_file")],
+                    "markdown_files": [t.get("markdown_file") for t in parsed_content.get("tables", []) if t.get("markdown_file")]
                 },
                 "images": {
-                    "count": len(extracted_content.get("images", [])),
-                    "image_files": [img["file_path"] for img in extracted_content.get("images", [])],
-                    "text_files": [img.get("text_file") for img in extracted_content.get("images", []) if img.get("text_file")]
+                    "count": len(parsed_content.get("images", [])),
+                    "image_files": [img["file_path"] for img in parsed_content.get("images", [])],
+                    "text_files": [img.get("text_file") for img in parsed_content.get("images", []) if img.get("text_file")]
                 }
             }
         }
         
-        summary_path = self.output_dir / f"{Path(pdf_path).stem}_extraction_summary.json"
+        summary_path = self.output_dir / f"{Path(docx_path).stem}_parsing_summary.json"
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         
-        print(f"✓ Saved extraction summary to {summary_path}")
+        print(f"✓ Saved parsing summary to {summary_path}")
         return summary
 
 # Usage example
-def process_pdf_with_docling_advanced(
-    pdf_path: str, 
-    output_dir: str = "./docling_output",
+def process_docx_with_docling_advanced(
+    docx_path: str, 
+    output_dir: str = "./docling_docx_output",
     device: str = "auto",  # "auto" (recommended), "cpu", or "cuda"
-    do_ocr: bool = False  # Set to True for scanned PDFs
+    # Performance options
+    fast_mode: bool = False,  # Enable fast mode (skip images, lower quality)
+    num_threads: int = 8  # Number of threads (higher = faster on multi-core CPUs)
 ):
     """
-    Complete workflow for comprehensive PDF processing with Docling
+    Complete workflow for comprehensive DOCX processing with Docling
     
     Args:
-        pdf_path: Path to the PDF file
-        output_dir: Directory to save extracted content
+        docx_path: Path to the DOCX file
+        output_dir: Directory to save parsed content
         device: "auto" (auto-detect), "cpu", or "cuda" for GPU acceleration
-        do_ocr: Whether to perform OCR (False for text-based PDFs, True for scanned PDFs)
+        fast_mode: If True, skips image extraction for 2-5x faster processing
+        num_threads: Number of parallel threads (16-32 recommended for performance)
     """
-    processor = DoclingAdvancedProcessor(output_dir=output_dir, device=device, do_ocr=do_ocr)
+    # Configure performance based on mode
+    if fast_mode:
+        processor = DoclingDocxProcessor(
+            output_dir=output_dir, 
+            device=device,
+            num_threads=num_threads,
+            generate_picture_images=False,  # Skip images
+            images_scale=1.0                 # Normal resolution
+        )
+    else:
+        processor = DoclingDocxProcessor(
+            output_dir=output_dir, 
+            device=device,
+            num_threads=num_threads,
+            generate_picture_images=True,   # Extract images
+            images_scale=2.0                # Normal resolution (2.0 for high-res but slower)
+        )
     
-    # 1. Extract all content types
-    extracted_content = processor.extract_comprehensive_content(pdf_path)
-    if not extracted_content:
+    # 1. Parse all content types
+    parsed_content = processor.parse_comprehensive_content(docx_path)
+    if not parsed_content:
         return None
     
     # 2. Create comprehensive chunks
-    # chunks = processor.create_comprehensive_chunks(extracted_content, pdf_path)
+    # chunks = processor.create_comprehensive_chunks(parsed_content, docx_path)
     
     # 3. Save summary
-    summary = processor.save_extraction_summary(extracted_content, pdf_path)
+    summary = processor.save_parsing_summary(parsed_content, docx_path)
     
-    # 4. Store in vector database
-#    client = chromadb.PersistentClient(path="./chroma_db")
-#    collection_name = f"docling_comprehensive_{Path(pdf_path).stem}"
-#    collection = client.get_or_create_collection(name=collection_name)
+    # 4. Store in vector database (optional)
+    # client = chromadb.PersistentClient(path="./chroma_db")
+    # collection_name = f"docling_comprehensive_{Path(docx_path).stem}"
+    # collection = client.get_or_create_collection(name=collection_name)
     
- #   valid_chunks = [c for c in chunks if c.get("embedding")]
- #   if valid_chunks:
- #       collection.upsert(
- #           documents=[c["content"] for c in valid_chunks],
- #           embeddings=[c["embedding"] for c in valid_chunks],
- #           ids=[c["id"] for c in valid_chunks],
- #           metadatas=[c["metadata"] for c in valid_chunks]
- #       )
- #       print(f"✓ Stored {len(valid_chunks)} chunks in ChromaDB")
+    # valid_chunks = [c for c in chunks if c.get("embedding")]
+    # if valid_chunks:
+    #     collection.upsert(
+    #         documents=[c["content"] for c in valid_chunks],
+    #         embeddings=[c["embedding"] for c in valid_chunks],
+    #         ids=[c["id"] for c in valid_chunks],
+    #         metadatas=[c["metadata"] for c in valid_chunks]
+    #     )
+    #     print(f"✓ Stored {len(valid_chunks)} chunks in ChromaDB")
     
     return {
-        "extracted_content": extracted_content,
+        "parsed_content": parsed_content,
         # "chunks": chunks,
         "summary": summary,
         "output_directory": output_dir
@@ -570,51 +570,62 @@ def process_pdf_with_docling_advanced(
 
 # Usage:
 if __name__ == "__main__":
-    # Example 1: Text-based PDF with auto device detection (recommended)
-    result = process_pdf_with_docling_advanced(
-        pdf_path="docs\\DO_NOT_KovSpec.pdf",
-        device="auto",  # Auto-detect best device (CUDA if available, else CPU)
-        do_ocr=False    # False for text-based PDFs
+    # Example 1: BALANCED mode (recommended) - Good quality, reasonable speed
+    result = process_docx_with_docling_advanced(
+        docx_path="docs\\DO_NOT_KovSpec.docx",
+        device="auto",      # Auto-detect best device (CUDA if available, else CPU)
+        fast_mode=False,    # Extract images, better quality
+        num_threads=8      # Use 16 threads for parallel processing
     )
     
-    # Example 2: Force CPU usage
-    # result = process_pdf_with_docling_advanced(
-    #     pdf_path="docs\\DO_NOT_KovSpec.pdf",
-    #     device="cpu",   # Force CPU usage
-    #     do_ocr=False
+    # Example 2: FAST mode - 2-5x faster, skips images
+    # result = process_docx_with_docling_advanced(
+    #     docx_path="docs\\DO_NOT_KovSpec.docx",
+    #     device="auto",
+    #     fast_mode=True,    # Skip images for speed
+    #     num_threads=32     # Use more threads for maximum speed
     # )
     
-    # Example 3: Scanned PDF with OCR (slower but needed for scanned docs)
-    # result = process_pdf_with_docling_advanced(
-    #     pdf_path="docs\\scanned_document.pdf",
-    #     device="auto",  # Use best available device
-    #     do_ocr=True     # Enable OCR for scanned PDFs
+    # Example 3: HIGH QUALITY mode - Slower but best results
+    # processor = DoclingDocxProcessor(
+    #     output_dir="./docling_docx_output",
+    #     device="auto",
+    #     num_threads=8,                     # Fewer threads for stability
+    #     generate_picture_images=True,      # Extract all images
+    #     images_scale=2.0                   # High resolution images
     # )
+    # result = processor.parse_comprehensive_content("docs\\DO_NOT_KovSpec.docx")
     
     print("\n" + "=" * 70)
-    print("DOCLING Enhanced Example - Processing Complete!")
+    print("DOCLING DOCX Parser - Processing Complete!")
     print("=" * 70)
     print("Features:")
-    print("✓ Comprehensive TEXT extraction with element analysis")
-    print("✓ Advanced TABLE extraction:")
+    print("✓ Comprehensive TEXT parsing with element analysis")
+    print("✓ Advanced TABLE parsing:")
     print("  - DataFrame export and CSV saving in 'tables/' folder")
     print("  - Markdown files with formatted table content")
     print("  - Table images in 'tables/' folder")
-    print("✓ Complete IMAGE extraction:")
-    print("  - Page screenshots in 'pages/' folder")
+    print("✓ Complete IMAGE parsing:")
     print("  - Figure images in 'figures/' folder")
     print("  - Text files for ALL figures (with captions/metadata)")
     print("✓ Structured chunking for all content types")
-    print("✓ Individual chunk text files in 'chunks/' subdirectory")
     print("✓ Organized output directory structure")
-    print("✓ Detailed extraction summaries")
+    print("✓ Detailed parsing summaries")
     print(f"✓ Device support: CPU and CUDA")
-    print(f"✓ OCR control: Enabled/Disabled based on document type")
+    print("✓ Full document JSON export")
+    print("=" * 70)
+    print("\nPerformance Modes:")
+    print("  FAST mode:      fast_mode=True, num_threads=32  (2-5x faster, no images)")
+    print("  BALANCED mode:  fast_mode=False, num_threads=16 (recommended)")
+    print("  QUALITY mode:   images_scale=2.0 (slower)")
+    print("\nOptional: Install 'orjson' for 3-10x faster JSON serialization:")
+    print("  pip install orjson")
     print("=" * 70)
     print("\nOutput Structure:")
-    print("  docling_output/")
+    print("  docling_docx_output/")
+    print("  ├── {filename}_full.json  (complete document structure)")
     print("  ├── tables/        (CSV, markdown, and table images)")
-    print("  ├── pages/         (page screenshots)")
     print("  ├── figures/       (figures and captions)")
-    print("  └── chunks/        (individual chunk text files)")
+    print("  └── text/          (full text markdown)")
     print("=" * 70)
+

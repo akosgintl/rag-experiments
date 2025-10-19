@@ -207,7 +207,12 @@ marimo/_lsp/
 __marimo__/
 
 docs/
-docling_output/
-unstructured_output/
-markitdown_output/
-figures/
+docling_pdf_output/
+docling_docx_output/
+docling_xlsx_output/
+unstructured_pdf_output/
+unstructured_docx_output/
+unstructured_xlsx_output/
+markitdown_docx_output/
+markitdown_pdf_output/
+markitdown_xlsx_output/
