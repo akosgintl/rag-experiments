@@ -62,7 +62,7 @@ class UnstructuredAdvancedProcessor:
     def __init__(
         self, 
         embedding_model="all-MiniLM-L6-v2", 
-        output_dir="./unstructured_output",
+        output_dir="./unstructured_pdf_output",
         device="auto",  # "cpu", "cuda", or "auto" (auto-detect best available)
         do_ocr=True,  # Set to False for text-based PDFs to avoid OCR overhead
         ocr_languages=["hun"]  # OCR languages, e.g., ["eng"], ["hun"], ["eng", "hun"]
@@ -669,7 +669,7 @@ class UnstructuredAdvancedProcessor:
 def process_pdf_with_unstructured_advanced(
     pdf_path: str, 
     strategy: str = "hi_res", 
-    output_dir: str = "./unstructured_output",
+    output_dir: str = "./unstructured_pdf_output",
     device: str = "auto",  # "auto" (recommended), "cpu", or "cuda"
     do_ocr: bool = True,  # Set to True for scanned PDFs
     ocr_languages: list = ["hun"]  # OCR languages, e.g., ["eng"], ["hun"], ["eng", "hun"]

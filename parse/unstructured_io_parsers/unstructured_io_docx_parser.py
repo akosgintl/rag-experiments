@@ -62,7 +62,7 @@ class UnstructuredDocxProcessor:
     def __init__(
         self, 
         embedding_model="all-MiniLM-L6-v2", 
-        output_dir="./unstructured_output",
+        output_dir="./unstructured_docx_output",
         device="auto"  # "cpu", "cuda", or "auto" (auto-detect best available)
     ):
         """
@@ -637,7 +637,7 @@ class UnstructuredDocxProcessor:
 # Usage function
 def process_docx_with_unstructured_advanced(
     docx_path: str, 
-    output_dir: str = "./unstructured_output",
+    output_dir: str = "./unstructured_docx_output",
     device: str = "auto"  # "auto" (recommended), "cpu", or "cuda"
 ):
     """
@@ -713,7 +713,7 @@ if __name__ == "__main__":
     print("✓ Rich metadata preservation and detailed summaries")
     print("=" * 70)
     print("\nOutput Structure:")
-    print("  unstructured_output/")
+    print("  unstructured_docx_output/")
     print("  ├── images/    (extracted images)")
     print("  ├── tables/    (table CSV, HTML, and images)")
     print("  └── text/      (full text markdown and plain text)")

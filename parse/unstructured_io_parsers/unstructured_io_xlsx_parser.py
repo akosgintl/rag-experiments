@@ -54,7 +54,7 @@ class UnstructuredXlsxProcessor:
     def __init__(
         self, 
         embedding_model="all-MiniLM-L6-v2", 
-        output_dir="./unstructured_output",
+        output_dir="./unstructured_xlsx_output",
         device="auto"  # "cpu", "cuda", or "auto" (auto-detect best available)
     ):
         """
@@ -502,7 +502,7 @@ class UnstructuredXlsxProcessor:
 # Usage function
 def process_xlsx_with_unstructured_advanced(
     xlsx_path: str, 
-    output_dir: str = "./unstructured_output",
+    output_dir: str = "./unstructured_xlsx_output",
     device: str = "auto"  # "auto" (recommended), "cpu", or "cuda"
 ):
     """
@@ -585,7 +585,7 @@ if __name__ == "__main__":
     print(f"✓ Device support: CPU and CUDA")
     print("=" * 70)
     print("\nOutput Structure:")
-    print("  unstructured_output/")
+    print("  unstructured_xlsx_output/")
     print("  ├── sheets/    (CSV, markdown, and text for each sheet)")
     print("  ├── tables/    (parsed tables if available)")
     print("  ├── images/    (embedded images)")
