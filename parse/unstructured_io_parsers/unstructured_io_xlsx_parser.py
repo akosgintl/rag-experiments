@@ -4,7 +4,7 @@
 
 # Installation with full capabilities
 # pip install unstructured[xlsx] sentence-transformers chromadb
-# pip install pillow pandas openpyxl xlrd
+# pip install pillow pandas openpyxl xlrd msoffcrypto-tool
 
 import os
 import json

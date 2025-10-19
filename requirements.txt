@@ -13,7 +13,9 @@ chromadb
 pillow
 pandas
 openpyxl
-unstructured[pdf,paddleocr]
+unstructured[pdf,paddleocr,xlsx]
+msoffcrypto-tool
+xlrd
 beautifulsoup4
 lxml
 langchain
