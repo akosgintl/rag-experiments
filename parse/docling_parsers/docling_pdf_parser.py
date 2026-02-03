@@ -23,11 +23,11 @@ import torch
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractOcrOptions, RapidOcrOptions, OcrMacOptions, TesseractCliOcrOptions, EasyOcrOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode, TesseractOcrOptions, RapidOcrOptions, OcrMacOptions, TesseractCliOcrOptions, EasyOcrOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 from docling_core.types.doc.document import DoclingDocument
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 import chromadb
 
@@ -78,10 +78,10 @@ class DoclingAdvancedProcessor:
         
         # Configure pipeline for comprehensive parsing
         self.pipeline_options = PdfPipelineOptions()
-        self.pipeline_options.images_scale = 1.0  # Normal resolution (was 2.0 - too slow)
+        self.pipeline_options.images_scale = 2  # Normal resolution (was 1.0 - too slow)
         self.pipeline_options.generate_page_images = True
         self.pipeline_options.generate_picture_images = True
-        self.pipeline_options.generate_table_images = False  # Usually not needed, very slow
+        self.pipeline_options.generate_table_images = True  # Usually not needed, very slow
         self.pipeline_options.do_ocr = do_ocr  # Control OCR
         # Any of the OCR options can be used: EasyOcrOptions, TesseractOcrOptions, TesseractCliOcrOptions, OcrMacOptions (macOS only), RapidOcrOptions
         # ocr_options = EasyOcrOptions(force_full_page_ocr=True, lang=["hu"])
@@ -92,6 +92,7 @@ class DoclingAdvancedProcessor:
         # self.pipeline_options.ocr_options = ocr_options
         self.pipeline_options.do_table_structure = True  # Control table structure parsing
         self.pipeline_options.table_structure_options.do_cell_matching = True  # Control cell matching
+        self.pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
         self.pipeline_options.accelerator_options = AcceleratorOptions(num_threads=8, device=device)  # Increased from 8 to 16 for better performance
         
         # Initialize converter with pipeline options
@@ -102,11 +103,11 @@ class DoclingAdvancedProcessor:
         )
         
         # Initialize embedder with device support
-        self.embedder = SentenceTransformer(embedding_model, device=self.device)
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=10000000,
-            chunk_overlap=100000
-        )
+        # self.embedder = SentenceTransformer(embedding_model, device=self.device)
+        # self.text_splitter = RecursiveCharacterTextSplitter(
+        #     chunk_size=10000000,
+        #     chunk_overlap=100000
+        # )
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
         
@@ -396,102 +397,102 @@ class DoclingAdvancedProcessor:
         figure_count = sum(1 for img in images if img.get("type") == "figure")
         print(f"✓ Parsed {len(images)} images ({figure_count} figures with text files, {text_count} total text files)")
     
-    def create_comprehensive_chunks(self, parsed_content: Dict, pdf_path: str) -> List[Dict[str, Any]]:
-        """Create chunks incorporating text, tables, and images"""
-        chunks = []
-        chunk_counter = 0
+    # def create_comprehensive_chunks(self, parsed_content: Dict, pdf_path: str) -> List[Dict[str, Any]]:
+    #     """Create chunks incorporating text, tables, and images"""
+    #     chunks = []
+    #     chunk_counter = 0
         
-        # Text chunks
-        if parsed_content.get("text_content", {}).get("full_markdown"):
-            text_chunks = self.text_splitter.split_text(parsed_content["text_content"]["full_markdown"])
+    #     # Text chunks
+    #     if parsed_content.get("text_content", {}).get("full_markdown"):
+    #         text_chunks = self.text_splitter.split_text(parsed_content["text_content"]["full_markdown"])
             
-            for i, chunk in enumerate(text_chunks):
-                chunk_obj = {
-                    "id": f"{Path(pdf_path).stem}_text_chunk_{i}",
-                    "type": "text",
-                    "content": chunk,
-                    "embedding": self.embedder.encode(chunk).tolist(),
-                    "metadata": {
-                        "chunk_index": i,
-                        "content_type": "text",
-                        "source": pdf_path,
-                        "chunk_size": len(chunk)
-                    }
-                }
-                chunks.append(chunk_obj)
+    #         for i, chunk in enumerate(text_chunks):
+    #             chunk_obj = {
+    #                 "id": f"{Path(pdf_path).stem}_text_chunk_{i}",
+    #                 "type": "text",
+    #                 "content": chunk,
+    #                 "embedding": self.embedder.encode(chunk).tolist(),
+    #                 "metadata": {
+    #                     "chunk_index": i,
+    #                     "content_type": "text",
+    #                     "source": pdf_path,
+    #                     "chunk_size": len(chunk)
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        # Table chunks
-        for table in parsed_content.get("tables", []):
-            # Create chunk for table if it has text or CSV data
-            if table.get("text") or table.get("csv"):
-                # Create chunk for table text content
-                table_text = f"Table {table['id']}"
-                if table.get("page_number"):
-                    table_text += f" (Page {table['page_number']})"
-                table_text += "\\n"
+    #     # Table chunks
+    #     for table in parsed_content.get("tables", []):
+    #         # Create chunk for table if it has text or CSV data
+    #         if table.get("text") or table.get("csv"):
+    #             # Create chunk for table text content
+    #             table_text = f"Table {table['id']}"
+    #             if table.get("page_number"):
+    #                 table_text += f" (Page {table['page_number']})"
+    #             table_text += "\\n"
                 
-                if table.get("text"):
-                    table_text += f"\\n{table['text']}"
+    #             if table.get("text"):
+    #                 table_text += f"\\n{table['text']}"
                     
-                if table.get("csv"):
-                    # Include a preview of the CSV data
-                    csv_preview = table['csv'][:1000] if len(table['csv']) > 1000 else table['csv']
-                    table_text += f"\\n\\nTable Data (CSV format):\\n{csv_preview}"
-                    if len(table['csv']) > 1000:
-                        table_text += "\\n... (truncated)"
+    #             if table.get("csv"):
+    #                 # Include a preview of the CSV data
+    #                 csv_preview = table['csv'][:1000] if len(table['csv']) > 1000 else table['csv']
+    #                 table_text += f"\\n\\nTable Data (CSV format):\\n{csv_preview}"
+    #                 if len(table['csv']) > 1000:
+    #                     table_text += "\\n... (truncated)"
                 
-                chunk_obj = {
-                    "id": f"{Path(pdf_path).stem}_table_chunk_{table['id']}",
-                    "type": "table",
-                    "content": table_text,
-                    "embedding": self.embedder.encode(table_text).tolist(),
-                    "metadata": {
-                        "content_type": "table",
-                        "table_id": table["id"],
-                        "page_number": table.get("page_number"),
-                        "row_count": table.get("row_count", 0),
-                        "col_count": table.get("col_count", 0),
-                        "csv_file": table.get("csv_file"),
-                        "markdown_file": table.get("markdown_file"),
-                        "image_file": table.get("image_file"),
-                        "source": pdf_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(pdf_path).stem}_table_chunk_{table['id']}",
+    #                 "type": "table",
+    #                 "content": table_text,
+    #                 "embedding": self.embedder.encode(table_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "table",
+    #                     "table_id": table["id"],
+    #                     "page_number": table.get("page_number"),
+    #                     "row_count": table.get("row_count", 0),
+    #                     "col_count": table.get("col_count", 0),
+    #                     "csv_file": table.get("csv_file"),
+    #                     "markdown_file": table.get("markdown_file"),
+    #                     "image_file": table.get("image_file"),
+    #                     "source": pdf_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        # Image chunks (for figures with text files)
-        for image in parsed_content.get("images", []):
-            # Only create chunks for figures (not pages) that have text files
-            if image.get("type") == "figure" and image.get("text_file"):
-                image_text = f"Image {image['id']}"
-                if image.get("page_number"):
-                    image_text += f" (Page {image['page_number']})"
+    #     # Image chunks (for figures with text files)
+    #     for image in parsed_content.get("images", []):
+    #         # Only create chunks for figures (not pages) that have text files
+    #         if image.get("type") == "figure" and image.get("text_file"):
+    #             image_text = f"Image {image['id']}"
+    #             if image.get("page_number"):
+    #                 image_text += f" (Page {image['page_number']})"
                 
-                # Add caption if available
-                if image.get("caption"):
-                    image_text += f": {image['caption']}"
-                else:
-                    image_text += " (Figure from document - no caption detected)"
+    #             # Add caption if available
+    #             if image.get("caption"):
+    #                 image_text += f": {image['caption']}"
+    #             else:
+    #                 image_text += " (Figure from document - no caption detected)"
                 
-                chunk_obj = {
-                    "id": f"{Path(pdf_path).stem}_image_chunk_{image['id']}",
-                    "type": "image",
-                    "content": image_text,
-                    "embedding": self.embedder.encode(image_text).tolist(),
-                    "metadata": {
-                        "content_type": "image",
-                        "image_id": image["id"],
-                        "page_number": image.get("page_number"),
-                        "image_file": image["file_path"],
-                        "text_file": image.get("text_file"),
-                        "image_size": image.get("size"),
-                        "source": pdf_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(pdf_path).stem}_image_chunk_{image['id']}",
+    #                 "type": "image",
+    #                 "content": image_text,
+    #                 "embedding": self.embedder.encode(image_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "image",
+    #                     "image_id": image["id"],
+    #                     "page_number": image.get("page_number"),
+    #                     "image_file": image["file_path"],
+    #                     "text_file": image.get("text_file"),
+    #                     "image_size": image.get("size"),
+    #                     "source": pdf_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        print(f"✓ Created {len(chunks)} comprehensive chunks")
-        return chunks
+    #     print(f"✓ Created {len(chunks)} comprehensive chunks")
+    #     return chunks
         
     def save_parsing_summary(self, parsed_content: Dict, pdf_path: str):
         """Save a summary of parsed content"""
@@ -578,21 +579,21 @@ def process_pdf_with_docling_advanced(
 if __name__ == "__main__":
     # Example 1: Text-based PDF with auto device detection (recommended)
     result = process_pdf_with_docling_advanced(
-        pdf_path="docs\\DO_NOT_KovSpec.pdf",
+        pdf_path="./docs/DO_NOT_KovSpec.pdf",
         device="auto",  # Auto-detect best device (CUDA if available, else CPU)
         do_ocr=False    # False for text-based PDFs
     )
     
     # Example 2: Force CPU usage
     # result = process_pdf_with_docling_advanced(
-    #     pdf_path="docs\\DO_NOT_KovSpec.pdf",
+    #     pdf_path="./docs/DO_NOT_KovSpec.pdf",
     #     device="cpu",   # Force CPU usage
     #     do_ocr=False
     # )
     
     # Example 3: Scanned PDF with OCR (slower but needed for scanned docs)
     # result = process_pdf_with_docling_advanced(
-    #     pdf_path="docs\\scanned_document.pdf",
+    #     pdf_path="./docs/scanned_document.pdf",
     #     device="auto",  # Use best available device
     #     do_ocr=True     # Enable OCR for scanned PDFs
     # )
