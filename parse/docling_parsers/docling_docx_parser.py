@@ -118,10 +118,11 @@ class DoclingDocxProcessor:
         self.tables_dir = self.output_dir / "tables"
         self.figures_dir = self.output_dir / "figures"
         self.text_dir = self.output_dir / "text"
-        
+        self.pages_dir = self.output_dir / "pages"
         self.tables_dir.mkdir(exist_ok=True, parents=True)
         self.figures_dir.mkdir(exist_ok=True, parents=True)
         self.text_dir.mkdir(exist_ok=True, parents=True)
+        self.pages_dir.mkdir(exist_ok=True, parents=True)
 
         perf_info = f"threads={num_threads}, images={generate_picture_images}, scale={images_scale}"
         print(f"✓ Initialized DOCX processor with device: {self.device} ({perf_info})")
@@ -307,7 +308,25 @@ class DoclingDocxProcessor:
         """Parse images and figures"""
         images = []
         image_counter = 0
-        
+
+        # Parse page images
+        if hasattr(document, 'pages'):
+            for page_no, page in document.pages.items():
+                if hasattr(page, 'image') and page.image:
+                    try:
+                        page_image_path = self.pages_dir / f"{Path(docx_path).stem}_page_{page_no}.png"
+                        page.image.pil_image.save(page_image_path, "PNG")
+                        
+                        images.append({
+                            "type": "page",
+                            "id": f"page_{page_no}",
+                            "page_number": page_no,
+                            "file_path": str(page_image_path),
+                            "size": page.image.pil_image.size if hasattr(page.image, 'pil_image') else None
+                        })
+                    except Exception as e:
+                        print(f"Could not save page {page_no} image: {e}")
+
         # Parse figure/picture images
         for element, level in document.iterate_items():
             if isinstance(element, PictureItem):
