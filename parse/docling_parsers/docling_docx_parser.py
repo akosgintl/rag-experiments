@@ -545,6 +545,7 @@ def process_docx_with_docling_advanced(
             device=device,
             num_threads=num_threads,
             generate_picture_images=False,  # Skip images
+            generate_page_images=False,  # Skip images
             images_scale=1.0                 # Normal resolution
         )
     else:
@@ -553,6 +554,7 @@ def process_docx_with_docling_advanced(
             device=device,
             num_threads=num_threads,
             generate_picture_images=True,   # Extract images
+            generate_page_images=True,   # Extract images
             images_scale=2.0                # Normal resolution (2.0 for high-res but slower)
         )
     
