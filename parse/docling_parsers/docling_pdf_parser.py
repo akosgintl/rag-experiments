@@ -28,7 +28,7 @@ from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 from docling_core.types.doc.document import DoclingDocument
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 # from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer
 import chromadb
 
 def get_available_device(preferred_device: str = "cuda") -> str:

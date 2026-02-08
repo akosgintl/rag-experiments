@@ -25,8 +25,8 @@ from docling.datamodel.pipeline_options import PaginatedPipelineOptions
 from docling.datamodel.accelerator_options import AcceleratorOptions
 from docling_core.types.doc import PictureItem, TableItem, ImageRefMode
 from docling_core.types.doc.document import DoclingDocument
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+# from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from sentence_transformers import SentenceTransformer
 
 # Try to use faster JSON library
 try:
@@ -69,6 +69,7 @@ class DoclingDocxProcessor:
         # Performance options
         num_threads=8,  # Number of threads for parallel processing (default: 16)
         generate_picture_images=True,  # Extract images (set False to speed up)
+        generate_page_images=True,
         images_scale=1.0,  # Image resolution scale (1.0=normal, 2.0=high-res but slower)
         image_ref_mode=ImageRefMode.EMBEDDED  # How to handle images in document
     ):
@@ -91,6 +92,7 @@ class DoclingDocxProcessor:
         pipeline_options = PaginatedPipelineOptions()
         pipeline_options.images_scale = images_scale
         pipeline_options.generate_picture_images = generate_picture_images
+        pipeline_options.generate_page_images = generate_page_images
         pipeline_options.accelerator_options = AcceleratorOptions(
             num_threads=num_threads,
             device=device
@@ -104,11 +106,11 @@ class DoclingDocxProcessor:
         )
 
         # Initialize embedder with device support
-        self.embedder = SentenceTransformer(embedding_model, device=self.device)
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=10000000,
-            chunk_overlap=100000
-        )
+        # self.embedder = SentenceTransformer(embedding_model, device=self.device)
+        # self.text_splitter = RecursiveCharacterTextSplitter(
+        #     chunk_size=10000000,
+        #     chunk_overlap=100000
+        # )
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
         
@@ -371,102 +373,102 @@ class DoclingDocxProcessor:
         text_count = sum(1 for img in images if img.get("text_file"))
         print(f"✓ Parsed {len(images)} images ({text_count} with text files)")
     
-    def create_comprehensive_chunks(self, parsed_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
-        """Create chunks incorporating text, tables, and images"""
-        chunks = []
-        chunk_counter = 0
+    # def create_comprehensive_chunks(self, parsed_content: Dict, docx_path: str) -> List[Dict[str, Any]]:
+    #     """Create chunks incorporating text, tables, and images"""
+    #     chunks = []
+    #     chunk_counter = 0
         
-        # Text chunks
-        if parsed_content.get("text_content", {}).get("full_markdown"):
-            text_chunks = self.text_splitter.split_text(parsed_content["text_content"]["full_markdown"])
+    #     # Text chunks
+    #     if parsed_content.get("text_content", {}).get("full_markdown"):
+    #         text_chunks = self.text_splitter.split_text(parsed_content["text_content"]["full_markdown"])
             
-            for i, chunk in enumerate(text_chunks):
-                chunk_obj = {
-                    "id": f"{Path(docx_path).stem}_text_chunk_{i}",
-                    "type": "text",
-                    "content": chunk,
-                    "embedding": self.embedder.encode(chunk).tolist(),
-                    "metadata": {
-                        "chunk_index": i,
-                        "content_type": "text",
-                        "source": docx_path,
-                        "chunk_size": len(chunk)
-                    }
-                }
-                chunks.append(chunk_obj)
+    #         for i, chunk in enumerate(text_chunks):
+    #             chunk_obj = {
+    #                 "id": f"{Path(docx_path).stem}_text_chunk_{i}",
+    #                 "type": "text",
+    #                 "content": chunk,
+    #                 "embedding": self.embedder.encode(chunk).tolist(),
+    #                 "metadata": {
+    #                     "chunk_index": i,
+    #                     "content_type": "text",
+    #                     "source": docx_path,
+    #                     "chunk_size": len(chunk)
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        # Table chunks
-        for table in parsed_content.get("tables", []):
-            # Create chunk for table if it has text or CSV data
-            if table.get("text") or table.get("csv"):
-                # Create chunk for table text content
-                table_text = f"Table {table['id']}"
-                if table.get("page_number"):
-                    table_text += f" (Page {table['page_number']})"
-                table_text += "\\n"
+    #     # Table chunks
+    #     for table in parsed_content.get("tables", []):
+    #         # Create chunk for table if it has text or CSV data
+    #         if table.get("text") or table.get("csv"):
+    #             # Create chunk for table text content
+    #             table_text = f"Table {table['id']}"
+    #             if table.get("page_number"):
+    #                 table_text += f" (Page {table['page_number']})"
+    #             table_text += "\\n"
                 
-                if table.get("text"):
-                    table_text += f"\\n{table['text']}"
+    #             if table.get("text"):
+    #                 table_text += f"\\n{table['text']}"
                     
-                if table.get("csv"):
-                    # Include a preview of the CSV data
-                    csv_preview = table['csv'][:1000] if len(table['csv']) > 1000 else table['csv']
-                    table_text += f"\\n\\nTable Data (CSV format):\\n{csv_preview}"
-                    if len(table['csv']) > 1000:
-                        table_text += "\\n... (truncated)"
+    #             if table.get("csv"):
+    #                 # Include a preview of the CSV data
+    #                 csv_preview = table['csv'][:1000] if len(table['csv']) > 1000 else table['csv']
+    #                 table_text += f"\\n\\nTable Data (CSV format):\\n{csv_preview}"
+    #                 if len(table['csv']) > 1000:
+    #                     table_text += "\\n... (truncated)"
                 
-                chunk_obj = {
-                    "id": f"{Path(docx_path).stem}_table_chunk_{table['id']}",
-                    "type": "table",
-                    "content": table_text,
-                    "embedding": self.embedder.encode(table_text).tolist(),
-                    "metadata": {
-                        "content_type": "table",
-                        "table_id": table["id"],
-                        "page_number": table.get("page_number"),
-                        "row_count": table.get("row_count", 0),
-                        "col_count": table.get("col_count", 0),
-                        "csv_file": table.get("csv_file"),
-                        "markdown_file": table.get("markdown_file"),
-                        "image_file": table.get("image_file"),
-                        "source": docx_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(docx_path).stem}_table_chunk_{table['id']}",
+    #                 "type": "table",
+    #                 "content": table_text,
+    #                 "embedding": self.embedder.encode(table_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "table",
+    #                     "table_id": table["id"],
+    #                     "page_number": table.get("page_number"),
+    #                     "row_count": table.get("row_count", 0),
+    #                     "col_count": table.get("col_count", 0),
+    #                     "csv_file": table.get("csv_file"),
+    #                     "markdown_file": table.get("markdown_file"),
+    #                     "image_file": table.get("image_file"),
+    #                     "source": docx_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        # Image chunks (for figures with text files)
-        for image in parsed_content.get("images", []):
-            # Only create chunks for figures that have text files
-            if image.get("type") == "figure" and image.get("text_file"):
-                image_text = f"Image {image['id']}"
-                if image.get("page_number"):
-                    image_text += f" (Page {image['page_number']})"
+    #     # Image chunks (for figures with text files)
+    #     for image in parsed_content.get("images", []):
+    #         # Only create chunks for figures that have text files
+    #         if image.get("type") == "figure" and image.get("text_file"):
+    #             image_text = f"Image {image['id']}"
+    #             if image.get("page_number"):
+    #                 image_text += f" (Page {image['page_number']})"
                 
-                # Add caption if available
-                if image.get("caption"):
-                    image_text += f": {image['caption']}"
-                else:
-                    image_text += " (Figure from document - no caption detected)"
+    #             # Add caption if available
+    #             if image.get("caption"):
+    #                 image_text += f": {image['caption']}"
+    #             else:
+    #                 image_text += " (Figure from document - no caption detected)"
                 
-                chunk_obj = {
-                    "id": f"{Path(docx_path).stem}_image_chunk_{image['id']}",
-                    "type": "image",
-                    "content": image_text,
-                    "embedding": self.embedder.encode(image_text).tolist(),
-                    "metadata": {
-                        "content_type": "image",
-                        "image_id": image["id"],
-                        "page_number": image.get("page_number"),
-                        "image_file": image["file_path"],
-                        "text_file": image.get("text_file"),
-                        "image_size": image.get("size"),
-                        "source": docx_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(docx_path).stem}_image_chunk_{image['id']}",
+    #                 "type": "image",
+    #                 "content": image_text,
+    #                 "embedding": self.embedder.encode(image_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "image",
+    #                     "image_id": image["id"],
+    #                     "page_number": image.get("page_number"),
+    #                     "image_file": image["file_path"],
+    #                     "text_file": image.get("text_file"),
+    #                     "image_size": image.get("size"),
+    #                     "source": docx_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        print(f"✓ Created {len(chunks)} comprehensive chunks")
-        return chunks
+    #     print(f"✓ Created {len(chunks)} comprehensive chunks")
+    #     return chunks
         
     def save_parsing_summary(self, parsed_content: Dict, docx_path: str):
         """Save a summary of parsed content"""
@@ -572,7 +574,7 @@ def process_docx_with_docling_advanced(
 if __name__ == "__main__":
     # Example 1: BALANCED mode (recommended) - Good quality, reasonable speed
     result = process_docx_with_docling_advanced(
-        docx_path="docs\\DO_NOT_KovSpec.docx",
+        docx_path="./docs/DO_NOT_KovSpec.docx",
         device="auto",      # Auto-detect best device (CUDA if available, else CPU)
         fast_mode=False,    # Extract images, better quality
         num_threads=8      # Use 16 threads for parallel processing
@@ -580,7 +582,7 @@ if __name__ == "__main__":
     
     # Example 2: FAST mode - 2-5x faster, skips images
     # result = process_docx_with_docling_advanced(
-    #     docx_path="docs\\DO_NOT_KovSpec.docx",
+    #     docx_path="./docs/DO_NOT_KovSpec.docx",
     #     device="auto",
     #     fast_mode=True,    # Skip images for speed
     #     num_threads=32     # Use more threads for maximum speed
@@ -594,7 +596,7 @@ if __name__ == "__main__":
     #     generate_picture_images=True,      # Extract all images
     #     images_scale=2.0                   # High resolution images
     # )
-    # result = processor.parse_comprehensive_content("docs\\DO_NOT_KovSpec.docx")
+    # result = processor.parse_comprehensive_content("./docs/DO_NOT_KovSpec.docx")
     
     print("\n" + "=" * 70)
     print("DOCLING DOCX Parser - Processing Complete!")

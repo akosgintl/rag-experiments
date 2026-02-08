@@ -27,8 +27,8 @@ from docling.datamodel.pipeline_options import PaginatedPipelineOptions
 from docling.datamodel.accelerator_options import AcceleratorOptions
 from docling_core.types.doc import TableItem
 from docling_core.types.doc.document import DoclingDocument
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
+# from langchain_text_splitters import RecursiveCharacterTextSplitter
+# from sentence_transformers import SentenceTransformer
 
 def get_available_device(preferred_device: str = "cuda") -> str:
     """
@@ -85,11 +85,11 @@ class DoclingXlsxProcessor:
             })
         
         # Initialize embedder with device support
-        self.embedder = SentenceTransformer(embedding_model, device=self.device)
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=10000000,
-            chunk_overlap=100000
-        )
+        # self.embedder = SentenceTransformer(embedding_model, device=self.device)
+        # self.text_splitter = RecursiveCharacterTextSplitter(
+        #     chunk_size=10000000,
+        #     chunk_overlap=100000
+        # )
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True, parents=True)
         
@@ -339,97 +339,97 @@ class DoclingXlsxProcessor:
         except Exception as e:
             print(f"Note: Could not extract images with openpyxl: {e}")
     
-    def create_comprehensive_chunks(self, parsed_content: Dict, xlsx_path: str) -> List[Dict[str, Any]]:
-        """Create chunks incorporating sheets, tables, and images"""
-        chunks = []
+    # def create_comprehensive_chunks(self, parsed_content: Dict, xlsx_path: str) -> List[Dict[str, Any]]:
+    #     """Create chunks incorporating sheets, tables, and images"""
+    #     chunks = []
         
-        # Sheet chunks
-        for sheet in parsed_content.get("sheets", []):
-            if sheet.get("csv"):
-                # Create chunk for sheet
-                sheet_text = f"Sheet: {sheet['sheet_name']}\n"
-                sheet_text += f"Dimensions: {sheet['row_count']} rows × {sheet['col_count']} columns\n\n"
-                sheet_text += f"Columns: {', '.join(sheet['columns'])}\n\n"
+    #     # Sheet chunks
+    #     for sheet in parsed_content.get("sheets", []):
+    #         if sheet.get("csv"):
+    #             # Create chunk for sheet
+    #             sheet_text = f"Sheet: {sheet['sheet_name']}\n"
+    #             sheet_text += f"Dimensions: {sheet['row_count']} rows × {sheet['col_count']} columns\n\n"
+    #             sheet_text += f"Columns: {', '.join(sheet['columns'])}\n\n"
                 
-                # Include a preview of the CSV data
-                csv_preview = sheet['csv'][:2000] if len(sheet['csv']) > 2000 else sheet['csv']
-                sheet_text += f"Data (CSV format):\n{csv_preview}"
-                if len(sheet['csv']) > 2000:
-                    sheet_text += "\n... (truncated)"
+    #             # Include a preview of the CSV data
+    #             csv_preview = sheet['csv'][:2000] if len(sheet['csv']) > 2000 else sheet['csv']
+    #             sheet_text += f"Data (CSV format):\n{csv_preview}"
+    #             if len(sheet['csv']) > 2000:
+    #                 sheet_text += "\n... (truncated)"
                 
-                chunk_obj = {
-                    "id": f"{Path(xlsx_path).stem}_sheet_{sheet['sheet_name']}",
-                    "type": "sheet",
-                    "content": sheet_text,
-                    "embedding": self.embedder.encode(sheet_text).tolist(),
-                    "metadata": {
-                        "content_type": "sheet",
-                        "sheet_name": sheet["sheet_name"],
-                        "row_count": sheet["row_count"],
-                        "col_count": sheet["col_count"],
-                        "csv_file": sheet.get("csv_file"),
-                        "markdown_file": sheet.get("markdown_file"),
-                        "source": xlsx_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(xlsx_path).stem}_sheet_{sheet['sheet_name']}",
+    #                 "type": "sheet",
+    #                 "content": sheet_text,
+    #                 "embedding": self.embedder.encode(sheet_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "sheet",
+    #                     "sheet_name": sheet["sheet_name"],
+    #                     "row_count": sheet["row_count"],
+    #                     "col_count": sheet["col_count"],
+    #                     "csv_file": sheet.get("csv_file"),
+    #                     "markdown_file": sheet.get("markdown_file"),
+    #                     "source": xlsx_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        # Table chunks (from Docling if available)
-        for table in parsed_content.get("tables", []):
-            if table.get("text") or table.get("csv"):
-                table_text = f"Table {table['id']}\n"
+    #     # Table chunks (from Docling if available)
+    #     for table in parsed_content.get("tables", []):
+    #         if table.get("text") or table.get("csv"):
+    #             table_text = f"Table {table['id']}\n"
                 
-                if table.get("text"):
-                    table_text += f"\n{table['text']}"
+    #             if table.get("text"):
+    #                 table_text += f"\n{table['text']}"
                     
-                if table.get("csv"):
-                    csv_preview = table['csv'][:1000] if len(table['csv']) > 1000 else table['csv']
-                    table_text += f"\n\nTable Data (CSV format):\n{csv_preview}"
-                    if len(table['csv']) > 1000:
-                        table_text += "\n... (truncated)"
+    #             if table.get("csv"):
+    #                 csv_preview = table['csv'][:1000] if len(table['csv']) > 1000 else table['csv']
+    #                 table_text += f"\n\nTable Data (CSV format):\n{csv_preview}"
+    #                 if len(table['csv']) > 1000:
+    #                     table_text += "\n... (truncated)"
                 
-                chunk_obj = {
-                    "id": f"{Path(xlsx_path).stem}_table_{table['id']}",
-                    "type": "table",
-                    "content": table_text,
-                    "embedding": self.embedder.encode(table_text).tolist(),
-                    "metadata": {
-                        "content_type": "table",
-                        "table_id": table["id"],
-                        "row_count": table.get("row_count", 0),
-                        "col_count": table.get("col_count", 0),
-                        "csv_file": table.get("csv_file"),
-                        "source": xlsx_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(xlsx_path).stem}_table_{table['id']}",
+    #                 "type": "table",
+    #                 "content": table_text,
+    #                 "embedding": self.embedder.encode(table_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "table",
+    #                     "table_id": table["id"],
+    #                     "row_count": table.get("row_count", 0),
+    #                     "col_count": table.get("col_count", 0),
+    #                     "csv_file": table.get("csv_file"),
+    #                     "source": xlsx_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        # Image chunks
-        for image in parsed_content.get("images", []):
-            if image.get("text_file"):
-                image_text = f"Image {image['id']} from sheet '{image.get('sheet', 'unknown')}'"
-                if image.get("position"):
-                    image_text += f" at {image['position']}"
+    #     # Image chunks
+    #     for image in parsed_content.get("images", []):
+    #         if image.get("text_file"):
+    #             image_text = f"Image {image['id']} from sheet '{image.get('sheet', 'unknown')}'"
+    #             if image.get("position"):
+    #                 image_text += f" at {image['position']}"
                 
-                chunk_obj = {
-                    "id": f"{Path(xlsx_path).stem}_image_{image['id']}",
-                    "type": "image",
-                    "content": image_text,
-                    "embedding": self.embedder.encode(image_text).tolist(),
-                    "metadata": {
-                        "content_type": "image",
-                        "image_id": image["id"],
-                        "sheet": image.get("sheet"),
-                        "image_file": image["file_path"],
-                        "text_file": image.get("text_file"),
-                        "image_size": image.get("size"),
-                        "source": xlsx_path
-                    }
-                }
-                chunks.append(chunk_obj)
+    #             chunk_obj = {
+    #                 "id": f"{Path(xlsx_path).stem}_image_{image['id']}",
+    #                 "type": "image",
+    #                 "content": image_text,
+    #                 "embedding": self.embedder.encode(image_text).tolist(),
+    #                 "metadata": {
+    #                     "content_type": "image",
+    #                     "image_id": image["id"],
+    #                     "sheet": image.get("sheet"),
+    #                     "image_file": image["file_path"],
+    #                     "text_file": image.get("text_file"),
+    #                     "image_size": image.get("size"),
+    #                     "source": xlsx_path
+    #                 }
+    #             }
+    #             chunks.append(chunk_obj)
         
-        print(f"✓ Created {len(chunks)} comprehensive chunks")
-        return chunks
+    #     print(f"✓ Created {len(chunks)} comprehensive chunks")
+    #     return chunks
     
     def save_parsing_summary(self, parsed_content: Dict, xlsx_path: str):
         """Save a summary of parsed content"""
@@ -516,13 +516,13 @@ def process_xlsx_with_docling_advanced(
 if __name__ == "__main__":
     # Example: Process XLSX file with auto device detection (recommended)
     result = process_xlsx_with_docling_advanced(
-        xlsx_path="docs\\DO_NOT_Adatkor.xlsx",
+        xlsx_path="./docs/DO_NOT_Adatkor.xlsx",
         device="auto"  # Auto-detect best device (CUDA if available, else CPU)
     )
     
     # Example 2: Force CPU usage
     # result = process_xlsx_with_docling_advanced(
-    #     xlsx_path="docs\\DO_NOT_Adatkor.xlsx",
+    #     xlsx_path="./docs/DO_NOT_Adatkor.xlsx",
     #     device="cpu"   # Force CPU usage
     # )
     
