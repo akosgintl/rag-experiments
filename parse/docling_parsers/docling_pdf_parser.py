@@ -223,12 +223,14 @@ class DoclingAdvancedProcessor:
                     df = None
                     table_data = None
                     table_csv = None
+                    table_html = None
                     
                     if hasattr(element, 'export_to_dataframe'):
                         try:
                             df = element.export_to_dataframe(document)  # Pass document parameter
                             table_data = df.to_dict()
                             table_csv = df.to_csv(index=False)
+                            table_html = df.export_to_html(document)
                         except Exception as e:
                             print(f"Warning: Could not export table {table_counter} to dataframe: {e}")
                         
@@ -251,6 +253,7 @@ class DoclingAdvancedProcessor:
                         "text": table_text,
                         "data": table_data,
                         "csv": table_csv,
+                        "html": table_html,
                         "page_number": page_no,
                         "bbox": getattr(element, 'bbox', None),
                         "row_count": len(df) if df is not None else 0,
@@ -263,7 +266,14 @@ class DoclingAdvancedProcessor:
                         with open(csv_path, 'w', encoding='utf-8') as f:
                             f.write(table_csv)
                         table_info["csv_file"] = str(csv_path)
-                    
+
+                    # Save table as HTML
+                    if table_html:
+                        html_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.html"
+                        with open(html_path, 'w', encoding='utf-8') as f:
+                            f.write(table_html)
+                        table_info["html_file"] = str(html_path)
+
                     # Save table content as markdown
                     if df is not None:
                         md_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.md"
