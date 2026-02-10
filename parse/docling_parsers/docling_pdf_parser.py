@@ -95,7 +95,7 @@ class DoclingAdvancedProcessor:
         self.pipeline_options.do_table_structure = True  # Control table structure parsing
         self.pipeline_options.table_structure_options.do_cell_matching = True  # Control cell matching
         self.pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
-        self.pipeline_options.accelerator_options = AcceleratorOptions(num_threads=8, device=device)  # Increased from 8 to 16 for better performance
+        self.pipeline_options.accelerator_options = AcceleratorOptions(num_threads=8, device=self.device)
         
         # Initialize converter with pipeline options
         self.converter = DocumentConverter(
@@ -479,10 +479,13 @@ class DoclingAdvancedProcessor:
                         }
                         
                         # Always save a text file for each figure (with or without caption)
-                        print(f"Saving figure {image_counter} as text...")
                         txt_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.txt"
                         print(f"Saving figure {image_counter} as text...")
+                        with open(txt_path, 'w', encoding='utf-8') as f:
+                            f.write(caption if caption else f"Figure {image_counter} (no caption detected)")
+                        image_info["text_file"] = str(txt_path)
                         
+                        images.append(image_info)
                 except Exception as e:
                     print(f"Error processing image {image_counter}: {e}")
         
@@ -612,8 +615,8 @@ class DoclingAdvancedProcessor:
             }
         }
         
-        print(f"Saving parsing summary to {summary_path}...")
         summary_path = self.output_dir / f"{Path(pdf_path).stem}_parsing_summary.json"
+        print(f"Saving parsing summary to {summary_path}...")
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         

@@ -77,7 +77,7 @@ class DoclingXlsxProcessor:
         pipeline_options = PaginatedPipelineOptions()
         pipeline_options.accelerator_options = AcceleratorOptions(
             num_threads=8,
-            device=device
+            device=self.device
         )
         # Initialize converter for XLSX files
         self.converter = DocumentConverter(format_options={

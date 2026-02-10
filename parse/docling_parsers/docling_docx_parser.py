@@ -95,7 +95,7 @@ class DoclingDocxProcessor:
         pipeline_options.generate_page_images = generate_page_images
         pipeline_options.accelerator_options = AcceleratorOptions(
             num_threads=num_threads,
-            device=device
+            device=self.device
         )
         
         # Initialize converter with optimized pipeline
