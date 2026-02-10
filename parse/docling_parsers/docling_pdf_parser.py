@@ -21,11 +21,21 @@ from typing import List, Dict, Any, Tuple
 import pandas as pd
 from PIL import Image
 import io
+import time
 import torch
+
+# Enable Docling internal logging so converter.convert() shows progress
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Show Docling pipeline progress (page-level steps)
+logging.getLogger("docling").setLevel(logging.INFO)
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode, TesseractOcrOptions, RapidOcrOptions, OcrMacOptions, TesseractCliOcrOptions, EasyOcrOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, ThreadedPdfPipelineOptions, TableFormerMode, TesseractOcrOptions, RapidOcrOptions, OcrMacOptions, TesseractCliOcrOptions, EasyOcrOptions
 from docling_core.types.doc import ImageRefMode, PictureItem, TableItem
 from docling_core.types.doc.document import DoclingDocument
 from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
@@ -64,7 +74,8 @@ class DoclingAdvancedProcessor:
         embedding_model="all-MiniLM-L6-v2", 
         output_dir="./docling_pdf_output",
         device="auto",  # "cpu", "cuda", or "auto" (auto-detect best available)
-        do_ocr=False  # Set to False for text-based PDFs to avoid OCR overhead
+        do_ocr=False,  # Set to False for text-based PDFs to avoid OCR overhead
+        do_picture_description=False  # Set to True to generate textual descriptions for pictures using VLM
     ):
         """
         Initialize the DoclingAdvancedProcessor
@@ -74,13 +85,20 @@ class DoclingAdvancedProcessor:
             output_dir: Directory to save parsed content
             device: Device to use for processing ("cpu", "cuda", or "auto")
             do_ocr: Whether to perform OCR (set False for text-based PDFs)
+            do_picture_description: Whether to generate picture descriptions using VLM
         """
-        # Auto-detect or validate device availability
-        self.device = get_available_device(device)
+        # Use CUDA only when GPU-intensive features (OCR or picture description) are enabled
+        needs_gpu = do_ocr or do_picture_description
+        if needs_gpu:
+            self.device = get_available_device(device)
+        else:
+            self.device = "cpu"
+            if device in ["cuda", "auto"]:
+                print(f"ℹ Neither OCR nor picture description is enabled — using CPU (no GPU needed).")
         
-        # Configure pipeline for comprehensive parsing
-        self.pipeline_options = PdfPipelineOptions()
-        self.pipeline_options.images_scale = 2  # Normal resolution (was 1.0 - too slow)
+        # Configure pipeline for comprehensive parsing (threaded for stage-level parallelism)
+        self.pipeline_options = ThreadedPdfPipelineOptions()
+        self.pipeline_options.images_scale = 1  # Normal resolution (was 1.0 - too slow)
         self.pipeline_options.generate_page_images = True
         self.pipeline_options.generate_picture_images = True
         self.pipeline_options.generate_table_images = True  # Usually not needed, very slow
@@ -92,6 +110,7 @@ class DoclingAdvancedProcessor:
         # ocr_options = RapidOcrOptions(force_full_page_ocr=True, lang=["hu"])
         # ocr_options = TesseractCliOcrOptions(force_full_page_ocr=True, lang=["hu"])
         # self.pipeline_options.ocr_options = ocr_options
+        self.pipeline_options.do_picture_description = do_picture_description  # Control picture description via VLM
         self.pipeline_options.do_table_structure = True  # Control table structure parsing
         self.pipeline_options.table_structure_options.do_cell_matching = True  # Control cell matching
         self.pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
@@ -124,7 +143,7 @@ class DoclingAdvancedProcessor:
         self.figures_dir.mkdir(exist_ok=True, parents=True)
         self.text_dir.mkdir(exist_ok=True, parents=True)
 
-        print(f"✓ Initialized with device: {self.device}, OCR: {do_ocr}")
+        print(f"✓ Initialized with device: {self.device}, OCR: {do_ocr}, Picture description: {do_picture_description}")
     
     def parse_comprehensive_content(self, pdf_path: str) -> Dict[str, Any]:
         """
@@ -132,7 +151,11 @@ class DoclingAdvancedProcessor:
         """
         try:
             print(f"Processing {pdf_path} with Docling...")
+            print(f"  (Docling conversion starting - progress will be logged below)")
+            convert_start = time.time()
             result = self.converter.convert(pdf_path)
+            convert_elapsed = time.time() - convert_start
+            print(f"✓ Docling conversion finished in {convert_elapsed:.1f}s")
             document = result.document
                        
             # Export and save JSON
@@ -281,7 +304,6 @@ class DoclingAdvancedProcessor:
                 
                 # Parse table data
                 try:
-                    print(f"Parsing table {table_counter}...")
                     # Get DataFrame if possible (using document parameter for latest API)
                     df = None
                     table_data = None
@@ -293,7 +315,6 @@ class DoclingAdvancedProcessor:
                     # Export DataFrame (for CSV and dict data)
                     if hasattr(element, 'export_to_dataframe'):
                         try:
-                            print(f"Exporting table {table_counter} to dataframe...")
                             df = element.export_to_dataframe(document)
                             # Deduplicate column names to avoid data loss in to_dict()
                             if df.columns.duplicated().any():
@@ -315,14 +336,12 @@ class DoclingAdvancedProcessor:
                     # (NOT pandas DataFrame methods, which expect a file buf as first arg)
                     if hasattr(element, 'export_to_html'):
                         try:
-                            print(f"Exporting table {table_counter} to HTML...")
                             table_html = element.export_to_html(document)
                         except Exception as e:
                             print(f"Warning: Could not export table {table_counter} to HTML: {e}")
                     
                     if hasattr(element, 'export_to_markdown'):
                         try:
-                            print(f"Exporting table {table_counter} to markdown...")
                             table_markdown = element.export_to_markdown(document)
                             # TableItem has no export_to_text; use markdown as text fallback
                             table_text = table_markdown
@@ -332,12 +351,10 @@ class DoclingAdvancedProcessor:
                     # Get table metadata from provenance
                     page_no = 'Unknown'
                     if hasattr(element, 'prov') and element.prov:
-                        print(f"Getting table metadata from provenance...")
                         prov_item = element.prov[0]
                         page_no = getattr(prov_item, 'page_no', 'Unknown')
                     
                     # Get table text content (TableItem uses export_to_markdown for text)
-                    print(f"Getting table text content...")
                     table_info = {
                         "id": f"table_{table_counter}",
                         "text": table_text,
@@ -353,7 +370,6 @@ class DoclingAdvancedProcessor:
                     
                     # Save table as CSV
                     if table_csv:
-                        print(f"Saving table {table_counter} as CSV...")
                         csv_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.csv"
                         with open(csv_path, 'w', encoding='utf-8') as f:
                             f.write(table_csv)
@@ -361,21 +377,18 @@ class DoclingAdvancedProcessor:
 
                     # Save table as HTML
                     if table_html:
-                        print(f"Saving table {table_counter} as HTML...")
                         html_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.html"
                         with open(html_path, 'w', encoding='utf-8') as f:
                             f.write(table_html)
                         table_info["html_file"] = str(html_path)
 
                     if table_text:
-                        print(f"Saving table {table_counter} as text...")
                         txt_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.txt"
                         with open(txt_path, 'w', encoding='utf-8') as f:
                             f.write(table_text)
                         table_info["text_file"] = str(txt_path)
 
                     if table_markdown:
-                        print(f"Saving table {table_counter} as markdown...")
                         md_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.md"
                         with open(md_path, 'w', encoding='utf-8') as f:
                             f.write(table_markdown)
@@ -384,7 +397,6 @@ class DoclingAdvancedProcessor:
                     # Save table image if available
                     if hasattr(element, 'get_image'):
                         try:
-                            print(f"Saving table {table_counter} as image...")
                             table_image = element.get_image(document)
                             if table_image:
                                 image_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.png"
@@ -426,7 +438,6 @@ class DoclingAdvancedProcessor:
             for page_no, page in document.pages.items():
                 if hasattr(page, 'image') and page.image:
                     try:
-                        print(f"Saving page {page_no} image...")
                         page_image_path = self.pages_dir / f"{Path(pdf_path).stem}_page_{page_no}.png"
                         page.image.pil_image.save(page_image_path, "PNG")
                         
@@ -450,23 +461,18 @@ class DoclingAdvancedProcessor:
                 
                 try:
                     # Get image
-                    print(f"Getting image {image_counter}...")
                     image = element.get_image(document)
                     if image:
-                        print(f"Saving image {image_counter}...")
                         image_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.png"
                         image.save(image_path, "PNG")
                         
                         # Get metadata from provenance
                         page_no = 'Unknown'
                         if hasattr(element, 'prov') and element.prov:
-                            print(f"Getting metadata from provenance...")
                             prov_item = element.prov[0]
                             page_no = getattr(prov_item, 'page_no', 'Unknown')
                         
-                        print(f"Getting caption/description...")
                         caption = element.caption_text(document)
-                        print(f"✓ Got caption/description")
                         
                         image_info = {
                             "type": "figure",
@@ -480,7 +486,6 @@ class DoclingAdvancedProcessor:
                         
                         # Always save a text file for each figure (with or without caption)
                         txt_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.txt"
-                        print(f"Saving figure {image_counter} as text...")
                         with open(txt_path, 'w', encoding='utf-8') as f:
                             f.write(caption if caption else f"Figure {image_counter} (no caption detected)")
                         image_info["text_file"] = str(txt_path)
@@ -628,7 +633,8 @@ def process_pdf_with_docling_advanced(
     pdf_path: str, 
     output_dir: str = "./docling_pdf_output",
     device: str = "auto",  # "auto" (recommended), "cpu", or "cuda"
-    do_ocr: bool = False  # Set to True for scanned PDFs
+    do_ocr: bool = False,  # Set to True for scanned PDFs
+    do_picture_description: bool = False  # Set to True to describe pictures via VLM
 ):
     """
     Complete workflow for comprehensive PDF processing with Docling
@@ -638,8 +644,9 @@ def process_pdf_with_docling_advanced(
         output_dir: Directory to save parsed content
         device: "auto" (auto-detect), "cpu", or "cuda" for GPU acceleration
         do_ocr: Whether to perform OCR (False for text-based PDFs, True for scanned PDFs)
+        do_picture_description: Whether to generate picture descriptions using VLM
     """
-    processor = DoclingAdvancedProcessor(output_dir=output_dir, device=device, do_ocr=do_ocr)
+    processor = DoclingAdvancedProcessor(output_dir=output_dir, device=device, do_ocr=do_ocr, do_picture_description=do_picture_description)
     
     # 1. Parse all content types
     parsed_content = processor.parse_comprehensive_content(pdf_path)
@@ -674,17 +681,30 @@ def process_pdf_with_docling_advanced(
 # Usage:
 if __name__ == "__main__":
     # Example 1: Text-based PDF with auto device detection (recommended)
+    pdf_path = "./docs/DO_NOT_KovSpec.pdf"
     parsed_content, summary, output_dir = process_pdf_with_docling_advanced(
-        pdf_path="./docs/DO_NOT_KovSpec.pdf",
+        pdf_path=pdf_path,
         device="auto",  # Auto-detect best device (CUDA if available, else CPU)
         do_ocr=False    # False for text-based PDFs
     )
-    print(f"✓ Parsed comprehensive content")
-    print(f"✓ Saved parsing summary")
-    print(f"✓ Saved output directory to {output_dir}")
-    print(f"✓ Parsed content: {parsed_content}")
-    print(f"✓ Summary: {summary}")
-    print(f"✓ Output directory: {output_dir}")
+    # Print concise statistics instead of the full data structures
+    text_info = parsed_content.get("text_content", {})
+    tables_info = parsed_content.get("tables", [])
+    images_info = parsed_content.get("images", [])
+    page_count = sum(1 for img in images_info if img.get("type") == "page")
+    figure_count = sum(1 for img in images_info if img.get("type") == "figure")
+
+    print(f"\n{'=' * 50}")
+    print(f"  Parsing Results for: {Path(pdf_path).stem}")
+    print(f"{'=' * 50}")
+    print(f"  Pages:    {page_count}")
+    print(f"  Text:     {len(text_info.get('elements', []))} elements, "
+          f"{text_info.get('word_count', 0)} words, "
+          f"{text_info.get('char_count', 0)} chars")
+    print(f"  Tables:   {len(tables_info)}")
+    print(f"  Figures:  {figure_count}")
+    print(f"  Output:   {output_dir}")
+    print(f"{'=' * 50}")
     
     # Example 2: Force CPU usage
     # result = process_pdf_with_docling_advanced(
