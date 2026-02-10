@@ -24,6 +24,10 @@ openai
 huggingface_hub[hf_xet]
 hf_xet
 
+marker-pdf
+tabulate
+markdown
+
 # Environment variable management
 python-dotenv
 
