@@ -14,6 +14,8 @@
 import os
 import json
 import base64
+import logging
+import warnings
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import pandas as pd
@@ -137,7 +139,14 @@ class DoclingAdvancedProcessor:
             json_path = self.output_dir / f"{Path(pdf_path).stem}_full.json"
             document.save_as_json(json_path)
             html_path = self.output_dir / f"{Path(pdf_path).stem}_full.html"
-            document.save_as_html(html_path)
+            # Suppress harmless "Could not parse formula with MathML" warnings from docling's HTML serializer
+            _html_logger = logging.getLogger("docling_core.transforms.serializer.html")
+            _prev_level = _html_logger.level
+            _html_logger.setLevel(logging.ERROR)
+            try:
+                document.save_as_html(html_path)
+            finally:
+                _html_logger.setLevel(_prev_level)
             markdown_path = self.output_dir / f"{Path(pdf_path).stem}_full.md"
             document.save_as_markdown(markdown_path)
             
@@ -169,7 +178,14 @@ class DoclingAdvancedProcessor:
         """Parse and process text content"""
         # Get full text as markdown
         full_markdown = document.export_to_markdown()
-        full_html = document.export_to_html()
+        # Suppress harmless "Could not parse formula with MathML" warnings from docling's HTML serializer
+        _html_logger = logging.getLogger("docling_core.transforms.serializer.html")
+        _prev_level = _html_logger.level
+        _html_logger.setLevel(logging.ERROR)
+        try:
+            full_html = document.export_to_html()
+        finally:
+            _html_logger.setLevel(_prev_level)
         full_text = document.export_to_text()
         parsed_content["text_content"] = {
             "full_markdown": full_markdown,
@@ -241,16 +257,41 @@ class DoclingAdvancedProcessor:
                     table_markdown = None
                     table_text = None
                     
+                    # Export DataFrame (for CSV and dict data)
                     if hasattr(element, 'export_to_dataframe'):
                         try:
-                            df = element.export_to_dataframe(document)  # Pass document parameter
+                            df = element.export_to_dataframe(document)
+                            # Deduplicate column names to avoid data loss in to_dict()
+                            if df.columns.duplicated().any():
+                                cols = list(df.columns)
+                                seen: Dict[str, int] = {}
+                                for i, col in enumerate(cols):
+                                    if col in seen:
+                                        seen[col] += 1
+                                        cols[i] = f"{col}_{seen[col]}"
+                                    else:
+                                        seen[col] = 0
+                                df.columns = cols
                             table_data = df.to_dict()
                             table_csv = df.to_csv(index=False)
-                            table_html = df.to_html(document)
-                            table_markdown = df.to_markdown(document)
-                            table_text = df.to_text(document)
                         except Exception as e:
                             print(f"Warning: Could not export table {table_counter} to dataframe: {e}")
+                    
+                    # Use TableItem's own export methods for HTML/markdown/text
+                    # (NOT pandas DataFrame methods, which expect a file buf as first arg)
+                    if hasattr(element, 'export_to_html'):
+                        try:
+                            table_html = element.export_to_html(document)
+                        except Exception as e:
+                            print(f"Warning: Could not export table {table_counter} to HTML: {e}")
+                    
+                    if hasattr(element, 'export_to_markdown'):
+                        try:
+                            table_markdown = element.export_to_markdown(document)
+                            # TableItem has no export_to_text; use markdown as text fallback
+                            table_text = table_markdown
+                        except Exception as e:
+                            print(f"Warning: Could not export table {table_counter} to markdown: {e}")
                         
                     # Get table metadata from provenance
                     page_no = 'Unknown'
