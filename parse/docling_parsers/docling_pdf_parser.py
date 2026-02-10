@@ -136,22 +136,32 @@ class DoclingAdvancedProcessor:
             document = result.document
                        
             # Export and save JSON
+            print(f"Exporting and saving JSON...")
             json_path = self.output_dir / f"{Path(pdf_path).stem}_full.json"
-            document.save_as_json(json_path)
-            html_path = self.output_dir / f"{Path(pdf_path).stem}_full.html"
-            # Suppress harmless "Could not parse formula with MathML" warnings from docling's HTML serializer
-            _html_logger = logging.getLogger("docling_core.transforms.serializer.html")
-            _prev_level = _html_logger.level
-            _html_logger.setLevel(logging.ERROR)
             try:
-                document.save_as_html(html_path)
-            finally:
-                _html_logger.setLevel(_prev_level)
-            markdown_path = self.output_dir / f"{Path(pdf_path).stem}_full.md"
-            document.save_as_markdown(markdown_path)
-            
+                document.save_as_json(json_path)
+            except Exception as e:
+                print(f"Error saving full JSON: {e}")
             print(f"✓ Saved full JSON to {json_path}")
 
+            # Save full HTML
+            print(f"Exporting and saving HTML...")
+            html_path = self.output_dir / f"{Path(pdf_path).stem}_full.html"
+            try:
+                document.save_as_html(html_path)
+            except Exception as e:
+                print(f"Error saving full HTML: {e}")
+            print(f"✓ Saved full HTML to {html_path}")
+
+            # Save full Markdown
+            print(f"Exporting and saving Markdown...")
+            markdown_path = self.output_dir / f"{Path(pdf_path).stem}_full.md"
+            try:
+                document.save_as_markdown(markdown_path)
+            except Exception as e:
+                print(f"Error saving full Markdown: {e}")
+            print(f"✓ Saved full Markdown to {markdown_path}")
+            
             parsed_content = {
                 "text_content": [],
                 "tables": [],
@@ -177,16 +187,32 @@ class DoclingAdvancedProcessor:
     def _parse_text_content(self, document: DoclingDocument, parsed_content: Dict, pdf_path: str):
         """Parse and process text content"""
         # Get full text as markdown
-        full_markdown = document.export_to_markdown()
-        # Suppress harmless "Could not parse formula with MathML" warnings from docling's HTML serializer
-        _html_logger = logging.getLogger("docling_core.transforms.serializer.html")
-        _prev_level = _html_logger.level
-        _html_logger.setLevel(logging.ERROR)
+        full_markdown = ""
+        print(f"Exporting and saving full Markdown...")
+        try:
+            full_markdown = document.export_to_markdown()
+        except Exception as e:
+            print(f"Error exporting full markdown: {e}")
+            full_markdown = ""
+        print(f"✓ Exported full Markdown")
+
+        print(f"Exporting and saving full HTML...")
         try:
             full_html = document.export_to_html()
-        finally:
-            _html_logger.setLevel(_prev_level)
-        full_text = document.export_to_text()
+        except Exception as e:
+                print(f"Error exporting full HTML: {e}")
+                full_html = ""
+        print(f"✓ Exported full HTML")
+
+        print(f"Exporting and saving full text...")
+        full_text = ""
+        try:
+            full_text = document.export_to_text()
+        except Exception as e:
+            print(f"Error exporting full text: {e}")
+            full_text = ""
+        print(f"✓ Exported full text")
+
         parsed_content["text_content"] = {
             "full_markdown": full_markdown,
             "full_html": full_html,
@@ -197,6 +223,7 @@ class DoclingAdvancedProcessor:
         
         # Parse text by elements for detailed analysis
         text_elements = []
+        print(f"Parsing text by elements for detailed analysis...")
         for element, level in document.iterate_items():
             if hasattr(element, 'text') and element.text.strip():
                 # Get page number from provenance
@@ -214,9 +241,11 @@ class DoclingAdvancedProcessor:
                 text_elements.append(element_info)
 
         parsed_content["text_content"]["elements"] = text_elements
+        print(f"✓ Saved text elements")
 
         # Save full markdown
         if full_markdown:
+            print(f"Saving full markdown...")
             md_path = self.text_dir / f"{Path(pdf_path).stem}_full_markdown.md"
             with open(md_path, 'w', encoding='utf-8') as f:
                 f.write(full_markdown)
@@ -224,6 +253,7 @@ class DoclingAdvancedProcessor:
 
         # Save full html
         if full_html:
+            print(f"Saving full HTML...")
             html_path = self.text_dir / f"{Path(pdf_path).stem}_full_html.html"
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(full_html)
@@ -231,15 +261,17 @@ class DoclingAdvancedProcessor:
 
         # Save full text
         if full_text:
+            print(f"Saving full text...")
             txt_path = self.text_dir / f"{Path(pdf_path).stem}_full_text.txt"
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(full_text)
             parsed_content["text_content"]["full_text_file"] = str(txt_path)
 
-        print(f"✓ Parsed {len(text_elements)} text elements")
+        print(f"✓ Saved text content")
     
     def _parse_tables(self, document: DoclingDocument, parsed_content: Dict, pdf_path: str):
         """Parse tables with structure preservation"""
+        print(f"Parsing tables with structure preservation...")
         tables = []
         table_counter = 0
         
@@ -249,6 +281,7 @@ class DoclingAdvancedProcessor:
                 
                 # Parse table data
                 try:
+                    print(f"Parsing table {table_counter}...")
                     # Get DataFrame if possible (using document parameter for latest API)
                     df = None
                     table_data = None
@@ -260,6 +293,7 @@ class DoclingAdvancedProcessor:
                     # Export DataFrame (for CSV and dict data)
                     if hasattr(element, 'export_to_dataframe'):
                         try:
+                            print(f"Exporting table {table_counter} to dataframe...")
                             df = element.export_to_dataframe(document)
                             # Deduplicate column names to avoid data loss in to_dict()
                             if df.columns.duplicated().any():
@@ -281,12 +315,14 @@ class DoclingAdvancedProcessor:
                     # (NOT pandas DataFrame methods, which expect a file buf as first arg)
                     if hasattr(element, 'export_to_html'):
                         try:
+                            print(f"Exporting table {table_counter} to HTML...")
                             table_html = element.export_to_html(document)
                         except Exception as e:
                             print(f"Warning: Could not export table {table_counter} to HTML: {e}")
                     
                     if hasattr(element, 'export_to_markdown'):
                         try:
+                            print(f"Exporting table {table_counter} to markdown...")
                             table_markdown = element.export_to_markdown(document)
                             # TableItem has no export_to_text; use markdown as text fallback
                             table_text = table_markdown
@@ -296,10 +332,12 @@ class DoclingAdvancedProcessor:
                     # Get table metadata from provenance
                     page_no = 'Unknown'
                     if hasattr(element, 'prov') and element.prov:
+                        print(f"Getting table metadata from provenance...")
                         prov_item = element.prov[0]
                         page_no = getattr(prov_item, 'page_no', 'Unknown')
                     
                     # Get table text content (TableItem uses export_to_markdown for text)
+                    print(f"Getting table text content...")
                     table_info = {
                         "id": f"table_{table_counter}",
                         "text": table_text,
@@ -315,6 +353,7 @@ class DoclingAdvancedProcessor:
                     
                     # Save table as CSV
                     if table_csv:
+                        print(f"Saving table {table_counter} as CSV...")
                         csv_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.csv"
                         with open(csv_path, 'w', encoding='utf-8') as f:
                             f.write(table_csv)
@@ -322,18 +361,21 @@ class DoclingAdvancedProcessor:
 
                     # Save table as HTML
                     if table_html:
+                        print(f"Saving table {table_counter} as HTML...")
                         html_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.html"
                         with open(html_path, 'w', encoding='utf-8') as f:
                             f.write(table_html)
                         table_info["html_file"] = str(html_path)
 
                     if table_text:
+                        print(f"Saving table {table_counter} as text...")
                         txt_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.txt"
                         with open(txt_path, 'w', encoding='utf-8') as f:
                             f.write(table_text)
                         table_info["text_file"] = str(txt_path)
 
                     if table_markdown:
+                        print(f"Saving table {table_counter} as markdown...")
                         md_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.md"
                         with open(md_path, 'w', encoding='utf-8') as f:
                             f.write(table_markdown)
@@ -342,13 +384,14 @@ class DoclingAdvancedProcessor:
                     # Save table image if available
                     if hasattr(element, 'get_image'):
                         try:
+                            print(f"Saving table {table_counter} as image...")
                             table_image = element.get_image(document)
                             if table_image:
                                 image_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.png"
                                 table_image.save(image_path, "PNG")
                                 table_info["image_file"] = str(image_path)
                         except Exception as e:
-                            print(f"Could not save table image: {e}")
+                            print(f"Could not save table {table_counter} image: {e}")
                     
                     tables.append(table_info)
                     
@@ -373,14 +416,17 @@ class DoclingAdvancedProcessor:
     
     def _parse_images(self, document: DoclingDocument, parsed_content: Dict, pdf_path: str):
         """Parse images and figures"""
+        print(f"Parsing images and figures...")
         images = []
         image_counter = 0
         
         # Parse page images
         if hasattr(document, 'pages'):
+            print(f"Parsing page images...")
             for page_no, page in document.pages.items():
                 if hasattr(page, 'image') and page.image:
                     try:
+                        print(f"Saving page {page_no} image...")
                         page_image_path = self.pages_dir / f"{Path(pdf_path).stem}_page_{page_no}.png"
                         page.image.pil_image.save(page_image_path, "PNG")
                         
@@ -394,26 +440,33 @@ class DoclingAdvancedProcessor:
                         })
                     except Exception as e:
                         print(f"Could not save page {page_no} image: {e}")
+            print(f"✓ Parsed {len(document.pages)} page images")
         
         # Parse figure/picture images
+        print(f"Parsing figure/picture images...")
         for element, level in document.iterate_items():
             if isinstance(element, PictureItem):
                 image_counter += 1
                 
                 try:
                     # Get image
+                    print(f"Getting image {image_counter}...")
                     image = element.get_image(document)
                     if image:
+                        print(f"Saving image {image_counter}...")
                         image_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.png"
                         image.save(image_path, "PNG")
                         
                         # Get metadata from provenance
                         page_no = 'Unknown'
                         if hasattr(element, 'prov') and element.prov:
+                            print(f"Getting metadata from provenance...")
                             prov_item = element.prov[0]
                             page_no = getattr(prov_item, 'page_no', 'Unknown')
                         
+                        print(f"Getting caption/description...")
                         caption = element.caption_text(document)
+                        print(f"✓ Got caption/description")
                         
                         image_info = {
                             "type": "figure",
@@ -426,23 +479,9 @@ class DoclingAdvancedProcessor:
                         }
                         
                         # Always save a text file for each figure (with or without caption)
+                        print(f"Saving figure {image_counter} as text...")
                         txt_path = self.figures_dir / f"{Path(pdf_path).stem}_figure_{image_counter}.txt"
-                        caption_text = f"Figure {image_counter}\n"
-                        caption_text += f"{'=' * 60}\n\n"
-                        caption_text += f"Source: {Path(pdf_path).name}\n"
-                        caption_text += f"Page: {page_no}\n"
-                        caption_text += f"Size: {image.size[0]}x{image.size[1]} pixels\n\n"
-                        
-                        if caption:
-                            caption_text += f"Caption/Description:\n{'-' * 60}\n{caption}"
-                        else:
-                            caption_text += f"Caption/Description:\n{'-' * 60}\n(No caption detected)"
-                        
-                        with open(txt_path, 'w', encoding='utf-8') as f:
-                            f.write(caption_text)
-                        image_info["text_file"] = str(txt_path)
-                        
-                        images.append(image_info)
+                        print(f"Saving figure {image_counter} as text...")
                         
                 except Exception as e:
                     print(f"Error processing image {image_counter}: {e}")
@@ -450,7 +489,7 @@ class DoclingAdvancedProcessor:
         parsed_content["images"] = images
         text_count = sum(1 for img in images if img.get("text_file"))
         figure_count = sum(1 for img in images if img.get("type") == "figure")
-        print(f"✓ Parsed {len(images)} images ({figure_count} figures with text files, {text_count} total text files)")
+        print(f"✓ Saved {len(images)} images ({figure_count} figures with text files, {text_count} total text files)")
     
     # def create_comprehensive_chunks(self, parsed_content: Dict, pdf_path: str) -> List[Dict[str, Any]]:
     #     """Create chunks incorporating text, tables, and images"""
@@ -551,6 +590,7 @@ class DoclingAdvancedProcessor:
         
     def save_parsing_summary(self, parsed_content: Dict, pdf_path: str):
         """Save a summary of parsed content"""
+        print(f"Saving parsing summary...")
         summary = {
             "document": Path(pdf_path).name,
             "parsing_summary": {
@@ -572,11 +612,12 @@ class DoclingAdvancedProcessor:
             }
         }
         
+        print(f"Saving parsing summary to {summary_path}...")
         summary_path = self.output_dir / f"{Path(pdf_path).stem}_parsing_summary.json"
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
         
-        print(f"✓ Saved parsing summary to {summary_path}")
+        print(f"✓ Saved parsing summary")
         return summary
 
 # Usage example
@@ -599,6 +640,7 @@ def process_pdf_with_docling_advanced(
     
     # 1. Parse all content types
     parsed_content = processor.parse_comprehensive_content(pdf_path)
+    print(f"✓ Parsed comprehensive content")
     if not parsed_content:
         return None
     
@@ -607,6 +649,7 @@ def process_pdf_with_docling_advanced(
     
     # 3. Save summary
     summary = processor.save_parsing_summary(parsed_content, pdf_path)
+    print(f"✓ Saved parsing summary")
     
     # 4. Store in vector database
 #    client = chromadb.PersistentClient(path="./chroma_db")
@@ -622,22 +665,23 @@ def process_pdf_with_docling_advanced(
  #           metadatas=[c["metadata"] for c in valid_chunks]
  #       )
  #       print(f"✓ Stored {len(valid_chunks)} chunks in ChromaDB")
-    
-    return {
-        "parsed_content": parsed_content,
-        # "chunks": chunks,
-        "summary": summary,
-        "output_directory": output_dir
-    }
+
+    return parsed_content, summary, output_dir
 
 # Usage:
 if __name__ == "__main__":
     # Example 1: Text-based PDF with auto device detection (recommended)
-    result = process_pdf_with_docling_advanced(
+    parsed_content, summary, output_dir = process_pdf_with_docling_advanced(
         pdf_path="./docs/DO_NOT_KovSpec.pdf",
         device="auto",  # Auto-detect best device (CUDA if available, else CPU)
         do_ocr=False    # False for text-based PDFs
     )
+    print(f"✓ Parsed comprehensive content")
+    print(f"✓ Saved parsing summary")
+    print(f"✓ Saved output directory to {output_dir}")
+    print(f"✓ Parsed content: {parsed_content}")
+    print(f"✓ Summary: {summary}")
+    print(f"✓ Output directory: {output_dir}")
     
     # Example 2: Force CPU usage
     # result = process_pdf_with_docling_advanced(
@@ -665,18 +709,7 @@ if __name__ == "__main__":
     print("✓ Complete IMAGE parsing:")
     print("  - Page screenshots in 'pages/' folder")
     print("  - Figure images in 'figures/' folder")
-    print("  - Text files for ALL figures (with captions/metadata)")
-    print("✓ Structured chunking for all content types")
-    print("✓ Individual chunk text files in 'chunks/' subdirectory")
+    print("✓ Full text markdown and plain text in 'text/' subdirectory")
     print("✓ Organized output directory structure")
     print("✓ Detailed parsing summaries")
-    print(f"✓ Device support: CPU and CUDA")
-    print(f"✓ OCR control: Enabled/Disabled based on document type")
-    print("=" * 70)
-    print("\nOutput Structure:")
-    print("  docling_output/")
-    print("  ├── tables/        (CSV, markdown, and table images)")
-    print("  ├── pages/         (page screenshots)")
-    print("  ├── figures/       (figures and captions)")
-    print("  └── chunks/        (individual chunk text files)")
     print("=" * 70)
