@@ -23,11 +23,8 @@ markitdown[all]
 openai
 huggingface_hub[hf_xet]
 hf_xet
-
 marker-pdf
-transformers>=4.51.2,<5.0.0
-tabulate
-markdown
+surya-ocr
 
 # Environment variable management
 python-dotenv
