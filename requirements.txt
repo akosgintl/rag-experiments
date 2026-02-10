@@ -25,6 +25,7 @@ huggingface_hub[hf_xet]
 hf_xet
 
 marker-pdf
+transformers>=4.45.0
 tabulate
 markdown
 
