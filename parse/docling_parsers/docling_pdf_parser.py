@@ -95,7 +95,7 @@ class DoclingAdvancedProcessor:
         self.pipeline_options.do_table_structure = True  # Control table structure parsing
         self.pipeline_options.table_structure_options.do_cell_matching = True  # Control cell matching
         self.pipeline_options.table_structure_options.mode = TableFormerMode.ACCURATE
-        self.pipeline_options.accelerator_options = AcceleratorOptions(num_threads=8, device=self.device)
+        self.pipeline_options.accelerator_options = AcceleratorOptions(num_threads=12, device=self.device)
         
         # Initialize converter with pipeline options
         self.converter = DocumentConverter(
