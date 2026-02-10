@@ -136,6 +136,10 @@ class DoclingAdvancedProcessor:
             # Export and save JSON
             json_path = self.output_dir / f"{Path(pdf_path).stem}_full.json"
             document.save_as_json(json_path)
+            html_path = self.output_dir / f"{Path(pdf_path).stem}_full.html"
+            document.save_as_html(html_path)
+            markdown_path = self.output_dir / f"{Path(pdf_path).stem}_full.md"
+            document.save_as_markdown(markdown_path)
             
             print(f"✓ Saved full JSON to {json_path}")
 
@@ -164,11 +168,15 @@ class DoclingAdvancedProcessor:
     def _parse_text_content(self, document: DoclingDocument, parsed_content: Dict, pdf_path: str):
         """Parse and process text content"""
         # Get full text as markdown
-        full_text = document.export_to_markdown()
+        full_markdown = document.export_to_markdown()
+        full_html = document.export_to_html()
+        full_text = document.export_to_text()
         parsed_content["text_content"] = {
-            "full_markdown": full_text,
-            "word_count": len(full_text.split()),
-            "char_count": len(full_text)
+            "full_markdown": full_markdown,
+            "full_html": full_html,
+            "full_text": full_text,
+            "word_count": len(full_markdown.split()),
+            "char_count": len(full_markdown)
         }
         
         # Parse text by elements for detailed analysis
@@ -191,20 +199,26 @@ class DoclingAdvancedProcessor:
 
         parsed_content["text_content"]["elements"] = text_elements
 
-        # Save full text as markdown
+        # Save full markdown
+        if full_markdown:
+            md_path = self.text_dir / f"{Path(pdf_path).stem}_full_markdown.md"
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(full_markdown)
+            parsed_content["text_content"]["full_markdown_file"] = str(md_path)
+
+        # Save full html
+        if full_html:
+            html_path = self.text_dir / f"{Path(pdf_path).stem}_full_html.html"
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(full_html)
+            parsed_content["text_content"]["full_html_file"] = str(html_path)
+
+        # Save full text
         if full_text:
-            txt_path = self.text_dir / f"{Path(pdf_path).stem}_full_text.md"
+            txt_path = self.text_dir / f"{Path(pdf_path).stem}_full_text.txt"
             with open(txt_path, 'w', encoding='utf-8') as f:
                 f.write(full_text)
             parsed_content["text_content"]["full_text_file"] = str(txt_path)
-
-        # Save text elements as markdown
-        #if text_elements:
-        #    for i, element in enumerate(text_elements):
-        #        txt_path = self.text_dir / f"{Path(pdf_path).stem}_text_element_{i}.md"
-        #        with open(txt_path, 'w', encoding='utf-8') as f:
-        #            f.write(element['text'])
-        #        text_elements[i]['text_file'] = str(txt_path)
 
         print(f"✓ Parsed {len(text_elements)} text elements")
     
@@ -224,13 +238,17 @@ class DoclingAdvancedProcessor:
                     table_data = None
                     table_csv = None
                     table_html = None
+                    table_markdown = None
+                    table_text = None
                     
                     if hasattr(element, 'export_to_dataframe'):
                         try:
                             df = element.export_to_dataframe(document)  # Pass document parameter
                             table_data = df.to_dict()
                             table_csv = df.to_csv(index=False)
-                            table_html = df.export_to_html(document)
+                            table_html = df.to_html(document)
+                            table_markdown = df.to_markdown(document)
+                            table_text = df.to_text(document)
                         except Exception as e:
                             print(f"Warning: Could not export table {table_counter} to dataframe: {e}")
                         
@@ -241,19 +259,13 @@ class DoclingAdvancedProcessor:
                         page_no = getattr(prov_item, 'page_no', 'Unknown')
                     
                     # Get table text content (TableItem uses export_to_markdown for text)
-                    table_text = ""
-                    if hasattr(element, 'export_to_markdown'):
-                        try:
-                            table_text = element.export_to_markdown(document)
-                        except:
-                            pass
-                    
                     table_info = {
                         "id": f"table_{table_counter}",
                         "text": table_text,
                         "data": table_data,
                         "csv": table_csv,
                         "html": table_html,
+                        "markdown": table_markdown,
                         "page_number": page_no,
                         "bbox": getattr(element, 'bbox', None),
                         "row_count": len(df) if df is not None else 0,
@@ -274,19 +286,14 @@ class DoclingAdvancedProcessor:
                             f.write(table_html)
                         table_info["html_file"] = str(html_path)
 
-                    # Save table content as markdown
-                    if df is not None:
+                    if table_text:
+                        txt_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.txt"
+                        with open(txt_path, 'w', encoding='utf-8') as f:
+                            f.write(table_text)
+                        table_info["text_file"] = str(txt_path)
+
+                    if table_markdown:
                         md_path = self.tables_dir / f"{Path(pdf_path).stem}_table_{table_counter}.md"
-                        table_markdown = f"# Table {table_counter}\n\n"
-                        table_markdown += f"**Source:** {Path(pdf_path).name}\n"
-                        table_markdown += f"**Page:** {page_no}\n"
-                        table_markdown += f"**Dimensions:** {len(df)} rows × {len(df.columns)} columns\n\n"
-                        table_markdown += "## Table Content\n\n"
-                        table_markdown += df.to_markdown(index=False)
-                        
-                        if table_text:
-                            table_markdown += f"\n\n## Raw Table Text\n\n```\n{table_text}\n```"
-                        
                         with open(md_path, 'w', encoding='utf-8') as f:
                             f.write(table_markdown)
                         table_info["markdown_file"] = str(md_path)
@@ -309,14 +316,19 @@ class DoclingAdvancedProcessor:
                     # Still add basic info
                     tables.append({
                         "id": f"table_{table_counter}",
-                        "text": "",
-                        "page_number": page_no if 'page_no' in locals() else 'Unknown',
-                        "error": str(e)
+                        "text": table_text,
+                        "data": table_data,
+                        "csv": table_csv,
+                        "html": table_html,
+                        "markdown": table_markdown,
+                        "page_number": page_no,
+                        "bbox": getattr(element, 'bbox', None),
+                        "row_count": len(df) if df is not None else 0,
+                        "col_count": len(df.columns) if df is not None else 0
                     })
         
         parsed_content["tables"] = tables
-        markdown_count = sum(1 for t in tables if t.get("markdown_file"))
-        print(f"✓ Parsed {len(tables)} tables ({markdown_count} with markdown files)")
+        print(f"✓ Parsed {len(tables)} tables")
     
     def _parse_images(self, document: DoclingDocument, parsed_content: Dict, pdf_path: str):
         """Parse images and figures"""
@@ -335,6 +347,7 @@ class DoclingAdvancedProcessor:
                             "type": "page",
                             "id": f"page_{page_no}",
                             "page_number": page_no,
+                            "bbox": getattr(page, 'bbox', None),
                             "file_path": str(page_image_path),
                             "size": page.image.pil_image.size if hasattr(page.image, 'pil_image') else None
                         })
@@ -359,16 +372,7 @@ class DoclingAdvancedProcessor:
                             prov_item = element.prov[0]
                             page_no = getattr(prov_item, 'page_no', 'Unknown')
                         
-                        # Try multiple methods to get caption/text (using latest Docling API)
-                        caption = ""
-                        if hasattr(element, 'export_to_markdown'):
-                            try:
-                                caption = element.export_to_markdown(document)
-                            except:
-                                pass
-                        
-                        if not caption:
-                            caption = getattr(element, 'text', '') or getattr(element, 'caption', '')
+                        caption = element.caption_text(document)
                         
                         image_info = {
                             "type": "figure",
